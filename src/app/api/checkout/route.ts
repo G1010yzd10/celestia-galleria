@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { countOrders, insertOrder } from "@/lib/db";
 
 interface CartItem {
   id: string;
@@ -39,21 +39,19 @@ export async function POST(req: NextRequest) {
     });
     total = Math.round(total * 100) / 100;
 
-    const order = await db.order.create({
-      data: {
-        customer,
-        items: JSON.stringify(safeItems),
-        total,
-        credits: Math.round(total),
-      },
+    const order = insertOrder({
+      customer,
+      items: JSON.stringify(safeItems),
+      total,
+      credits: Math.round(total),
     });
 
     return NextResponse.json({
       ok: true,
       orderId: order.id,
       total,
-      sector: "SECTOR-7",
-      message: "ORDER PLACED — SECTOR CLEARED",
+      sector: "CELESTIA",
+      message: "ORDER PLACED — BLESSINGS RENDERED",
     });
   } catch {
     return NextResponse.json(
@@ -65,8 +63,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const count = await db.order.count();
-    return NextResponse.json({ ok: true, orders: count });
+    return NextResponse.json({ ok: true, orders: countOrders() });
   } catch {
     return NextResponse.json({ ok: false, orders: 0 }, { status: 500 });
   }

@@ -108,15 +108,15 @@ export function ProductDialog({
                 setSelected(null);
                 setQtyLocal(1);
               }}
-              className="h-12 px-6 font-bold tracking-widest border-2 border-amber-500 bg-gradient-to-b from-amber-600 to-red-700 hover:from-amber-500 hover:to-red-600 text-white"
+              className="h-12 px-6 font-bold tracking-widest border-2 border-amber-400 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 hover:from-amber-200 hover:to-amber-500 !text-[#241304]"
             >
-              ADD TO CART
+              ✦ ADD TO CART
             </Button>
           </div>
         </div>
 
         <div className="text-[10px] text-neutral-600 tracking-wider">
-          RENDERED AS 9-ANGLE SPRITE IMPOSTER · SECTOR-7 VERIFIED
+          RENDERED AS 9-ANGLE SPRITE IMPOSTER · CELESTIA VERIFIED
         </div>
       </DialogContent>
     </Dialog>

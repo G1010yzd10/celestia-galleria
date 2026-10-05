@@ -36,11 +36,12 @@ export function bakeProduct(
   const scene = new THREE.Scene();
   scene.add(group);
 
-  // lights parented to the CAMERA so every bearing is lit identically
-  const key = new THREE.DirectionalLight(0xfff2dd, 2.2);
-  const rim = new THREE.DirectionalLight(0x2dd4bf, 1.1);
-  const amb = new THREE.AmbientLight(0x8fa3b0, 0.85);
-  const bounce = new THREE.DirectionalLight(0x36444d, 0.5);
+  // lights parented to the CAMERA so every bearing is lit identically —
+  // celestial three-point: warm sun key, golden rim, pearl-sky fill, aqua bounce
+  const key = new THREE.DirectionalLight(0xfff1d8, 2.6);
+  const rim = new THREE.DirectionalLight(0xffd9a0, 1.5);
+  const amb = new THREE.AmbientLight(0xd8e8ee, 1.05);
+  const bounce = new THREE.DirectionalLight(0x9fd8d0, 0.55);
   bounce.position.set(0, -1, 0);
   scene.add(amb, key, rim, bounce);
 

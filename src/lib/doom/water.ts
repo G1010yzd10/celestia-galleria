@@ -1,9 +1,9 @@
 import * as THREE from "three";
 
-// ─── Nukage-coolant water — full shader, zero textures ──────────────────────
-// Fresnel env reflection + animated procedural normals + neon specular
-// glints + edge foam + sparkle. The pool floor gets an additive caustics
-// shader. Both are pure math: 0 bytes of VRAM.
+// ─── Celestial lagoon — full shader, zero texture bytes ──────────────────────
+// Fresnel sky reflection + animated procedural normals + golden sun speculars
+// + iridescent thin-film sheen + edge foam + divine sparkle. The pool floor
+// gets additive caustics in aqua and gold. Pure math: 0 bytes of VRAM.
 
 const WATER_VERT = /* glsl */ `
   uniform float uTime;
@@ -23,8 +23,8 @@ const WATER_FRAG = /* glsl */ `
   uniform vec3 uDeep;
   uniform vec3 uShallow;
   uniform vec3 uSky;
-  uniform vec3 uAmber;
-  uniform vec3 uTeal;
+  uniform vec3 uSun;
+  uniform vec3 uAqua;
   uniform vec2 uHalf; // pool half extents for edge foam
   varying vec3 vWorld;
 
@@ -55,30 +55,37 @@ const WATER_FRAG = /* glsl */ `
     // ---- fresnel ----
     float fr = pow(1.0 - clamp(dot(V, n), 0.0, 1.0), 2.6);
 
-    // ---- fake environment: vertical gradient reflection ----
+    // ---- pearl-sky environment reflection ----
     float up = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 env = mix(uDeep, uSky, up * up);
 
-    // ---- neon specular glints (analytic "light strip" reflections) ----
-    vec3 L1 = normalize(vec3(0.35, 0.85, -0.25));
+    // ---- golden sun + aqua strip speculars (analytic glints) ----
+    vec3 L1 = normalize(vec3(0.12, 0.92, -0.18)); // sun through the oculus
     vec3 L2 = normalize(vec3(-0.45, 0.75, 0.35));
-    float sp1 = pow(max(dot(R, L1), 0.0), 120.0) * 2.4;
-    float sp2 = pow(max(dot(R, L2), 0.0), 180.0) * 1.8;
+    float sp1 = pow(max(dot(R, L1), 0.0), 90.0) * 4.2;
+    float sp2 = pow(max(dot(R, L2), 0.0), 190.0) * 1.8;
 
     // ---- body color ----
     vec3 col = mix(uShallow, env, 0.35 + 0.65 * fr);
-    col += uAmber * sp1 + uTeal * sp2;
+    col += uSun * sp1 + uAqua * sp2;
 
-    // ---- sparkle (fine-grained, subtle) ----
+    // ---- iridescent thin-film sheen at grazing angles ----
+    vec3 iri =
+        vec3(0.95, 0.55, 0.72) * pow(fr, 4.0) * 0.09
+      + vec3(0.55, 0.75, 0.95) * pow(fr, 6.0) * 0.07;
+    col += iri;
+
+    // ---- divine sparkle: gold-white glints ----
     vec2 cell = floor(p * 7.0) + floor(uTime * 4.0) * 0.37;
-    float spark = step(0.992, hash(cell)) * clamp(fr * 1.6, 0.0, 1.0);
-    col += vec3(0.9, 1.0, 0.95) * spark * 0.3;
+    float sp = hash(cell);
+    float spark = step(0.985, sp) * clamp(fr * 1.8, 0.0, 1.0);
+    col += mix(vec3(1.0, 0.9, 0.65), vec3(0.85, 1.0, 0.96), hash(cell + 3.1)) * spark * 0.55;
 
     // ---- edge foam ----
     vec2 dEdge = abs(uHalf - abs(p));
     float edge = min(dEdge.x, dEdge.y);
     float foam = (1.0 - smoothstep(0.0, 0.42, edge)) * (0.55 + 0.45 * sin(uTime * 2.0 + h(p * 3.0) * 6.0));
-    col = mix(col, vec3(0.75, 0.95, 0.9), foam * 0.3);
+    col = mix(col, vec3(0.92, 0.99, 0.96), foam * 0.32);
 
     gl_FragColor = vec4(col, 0.93);
     #include <colorspace_fragment>
@@ -97,6 +104,7 @@ const CAUSTIC_VERT = /* glsl */ `
 const CAUSTIC_FRAG = /* glsl */ `
   uniform float uTime;
   uniform vec3 uColor;
+  uniform vec3 uGold;
   varying vec3 vWorld;
   void main() {
     vec2 p = vWorld.xz * 1.4;
@@ -108,7 +116,9 @@ const CAUSTIC_FRAG = /* glsl */ `
     float a2 = sin(p.x * -3.3 + t * 1.2) + sin(p.y * 2.4 + t);
     float c2 = pow(max(0.0, (a2 + b) * 0.25), 3.0);
     float v = c * 0.75 + c2 * 0.45;
-    gl_FragColor = vec4(uColor * v, v * 0.85);
+    // aqua caustics with a warm gold undertone (sun through the oculus)
+    vec3 col = uColor * v + uGold * v * 0.42;
+    gl_FragColor = vec4(col, v * 0.85);
   }
 `;
 
@@ -131,11 +141,11 @@ export function buildWater(
     fragmentShader: WATER_FRAG,
     uniforms: {
       uTime: { value: 0 },
-      uDeep: { value: new THREE.Color(0x03181a) },
-      uShallow: { value: new THREE.Color(0x0b4a42) },
-      uSky: { value: new THREE.Color(0x155e56) },
-      uAmber: { value: new THREE.Color(0xffb454) },
-      uTeal: { value: new THREE.Color(0x53f5e5) },
+      uDeep: { value: new THREE.Color(0x0a3244) },
+      uShallow: { value: new THREE.Color(0x27b8ac) },
+      uSky: { value: new THREE.Color(0xaadbe6) },
+      uSun: { value: new THREE.Color(0xffd98c) },
+      uAqua: { value: new THREE.Color(0x8ff5e8) },
       uHalf: { value: new THREE.Vector2(w / 2, d / 2) },
     },
     transparent: true,
@@ -150,7 +160,8 @@ export function buildWater(
     fragmentShader: CAUSTIC_FRAG,
     uniforms: {
       uTime: { value: 0 },
-      uColor: { value: new THREE.Color(0x2dd4bf) },
+      uColor: { value: new THREE.Color(0x5fe8d2) },
+      uGold: { value: new THREE.Color(0xffe3a0) },
     },
     transparent: true,
     blending: THREE.AdditiveBlending,

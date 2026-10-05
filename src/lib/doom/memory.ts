@@ -64,6 +64,8 @@ export function trackedCanvasTexture(
   const tex = new THREE.CanvasTexture(canvas);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  // canvases are painted in sRGB — mark them so the shader decodes correctly
+  tex.colorSpace = THREE.SRGBColorSpace;
   if (mips) {
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.generateMipmaps = true;

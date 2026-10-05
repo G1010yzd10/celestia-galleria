@@ -52,21 +52,21 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
     <Sheet open={cartOpen} onOpenChange={setCartOpen}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md bg-[#0b0e12] border-l-2 border-amber-700/70 font-mono text-neutral-200 p-0 flex flex-col"
+        className="w-full sm:max-w-md bg-[#120d06] border-l-2 border-amber-600/70 font-mono text-neutral-200 p-0 flex flex-col"
       >
         <SheetHeader className="p-4 pb-3 border-b border-neutral-800">
-          <SheetTitle className="font-black tracking-widest text-amber-400 text-lg">
-            🛒 SUPPLY LOCKER
+          <SheetTitle className="font-black tracking-widest text-amber-300 text-lg">
+            🛒 BLESSED LOCKER
           </SheetTitle>
           <div className="text-[10px] text-neutral-500 tracking-[0.25em]">
-            SECTOR-7 GALLERIA · CHECKOUT TERMINAL
+            CELESTIA GALLERIA · CHECKOUT SHRINE
           </div>
         </SheetHeader>
 
         {lastOrder && (
           <div className="m-4 border-2 border-green-600/70 bg-green-950/40 p-4 text-sm">
             <div className="text-green-400 font-bold tracking-widest text-base">
-              ✔ ORDER PLACED — SECTOR CLEARED
+              ✔ ORDER PLACED — BLESSINGS RENDERED
             </div>
             <div className="text-neutral-400 text-xs mt-1.5 font-mono">
               ORDER #{lastOrder.orderId.slice(0, 8).toUpperCase()}
@@ -90,14 +90,14 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
               <div className="text-4xl mb-3 opacity-40">∅</div>
               LOCKER EMPTY.
               <div className="text-[11px] mt-1">
-                WALK UP TO A PRODUCT AND PRESS E.
+                WALK UP TO A HALOED PRODUCT AND PRESS E.
               </div>
             </div>
           )}
           {cart.map((item) => (
             <div
               key={item.id}
-              className="flex items-center gap-3 border border-neutral-800 bg-neutral-900/50 p-2.5"
+              className="flex items-center gap-3 border border-amber-900/50 bg-[#1a1207]/60 p-2.5"
             >
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-bold text-teal-200 truncate">{item.name}</div>
@@ -105,7 +105,7 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
                   {item.price.toLocaleString()} CRED ea
                 </div>
               </div>
-              <div className="flex items-center border border-neutral-700 bg-black/50 h-8">
+              <div className="flex items-center border border-amber-900/60 bg-black/50 h-8">
                 <button
                   className="w-7 h-8 text-neutral-400 hover:text-white text-sm"
                   onClick={() => (item.qty <= 1 ? removeFromCart(item.id) : setQty(item.id, item.qty - 1))}
@@ -124,7 +124,7 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
                   +
                 </button>
               </div>
-              <div className="w-20 text-right text-sm font-black tabular-nums text-amber-400">
+              <div className="w-20 text-right text-sm font-black tabular-nums text-amber-300">
                 {(item.qty * item.price).toLocaleString()}
               </div>
             </div>
@@ -140,8 +140,8 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
               TOTAL · {count} ITEM{count === 1 ? "" : "S"}
             </span>
             <span
-              className="text-3xl font-black tabular-nums text-amber-400"
-              style={{ textShadow: "0 0 14px rgba(251,191,36,0.5)" }}
+              className="text-3xl font-black tabular-nums text-amber-300"
+              style={{ textShadow: "0 0 14px rgba(255,217,140,0.55)" }}
             >
               {total.toLocaleString()}
             </span>
@@ -150,12 +150,12 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
           <Button
             disabled={cart.length === 0 || busy}
             onClick={checkout}
-            className="w-full h-12 font-bold tracking-[0.3em] border-2 border-green-600 bg-gradient-to-b from-green-700 to-green-900 hover:from-green-600 disabled:opacity-40 text-white"
+            className="w-full h-12 font-bold tracking-[0.3em] border-2 border-amber-400 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 hover:from-amber-200 hover:to-amber-500 disabled:opacity-40 !text-[#241304]"
           >
-            {busy ? "AUTHORIZING…" : "CHECKOUT"}
+            {busy ? "AUTHORIZING…" : "✦ CHECKOUT"}
           </Button>
           <div className="text-[9px] text-neutral-600 mt-2 text-center tracking-wider">
-            DEMO CHECKOUT — ORDERS PERSIST TO SQLITE
+            DEMO CHECKOUT — ORDERS PERSIST TO SQLITE (node:sqlite)
           </div>
         </div>
       </SheetContent>

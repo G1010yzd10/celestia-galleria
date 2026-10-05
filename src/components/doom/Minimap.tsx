@@ -29,7 +29,7 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
 
       ctx.clearRect(0, 0, SIZE, SIZE);
       // backdrop
-      ctx.fillStyle = "rgba(4,8,10,0.72)";
+      ctx.fillStyle = "rgba(10,7,3,0.72)";
       ctx.fillRect(0, 0, SIZE, SIZE);
 
       ctx.save();
@@ -51,15 +51,15 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
           const y = toY(cz * cell);
           const s = cell * scale;
           if (Math.abs(x) > SIZE / 2 + s || Math.abs(y) > SIZE / 2 + s) continue;
-          if (v === 1) ctx.fillStyle = "rgba(190,60,50,0.5)";
-          else if (v === 2) ctx.fillStyle = "rgba(45,212,191,0.30)";
-          else ctx.fillStyle = "rgba(245,158,11,0.75)";
+          if (v === 1) ctx.fillStyle = "rgba(200,150,60,0.5)";
+          else if (v === 2) ctx.fillStyle = "rgba(63,216,200,0.30)";
+          else ctx.fillStyle = "rgba(255,217,140,0.75)";
           ctx.fillRect(x, y, s, s);
         }
       }
 
       // pool outline shimmer
-      ctx.strokeStyle = "rgba(45,212,191,0.8)";
+      ctx.strokeStyle = "rgba(63,216,200,0.8)";
       ctx.lineWidth = 1;
       ctx.strokeRect(
         toX(pool.cx - pool.w / 2),
@@ -81,8 +81,8 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
       ctx.closePath();
       ctx.fill();
 
-      // player arrow (Doom red)
-      ctx.fillStyle = "#ff4436";
+      // player arrow (gold pilgrim)
+      ctx.fillStyle = "#ffd98c";
       ctx.beginPath();
       ctx.moveTo(0, -7);
       ctx.lineTo(5, 6);
@@ -93,14 +93,14 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
       ctx.restore();
 
       // frame
-      ctx.strokeStyle = "rgba(45,212,191,0.5)";
+      ctx.strokeStyle = "rgba(201,150,46,0.6)";
       ctx.lineWidth = 2;
       ctx.strokeRect(1, 1, SIZE - 2, SIZE - 2);
       // N marker rotates with map
       ctx.save();
       ctx.translate(SIZE / 2, SIZE / 2);
       ctx.rotate(st.yaw + Math.PI);
-      ctx.fillStyle = "rgba(45,212,191,0.9)";
+      ctx.fillStyle = "rgba(255,217,140,0.9)";
       ctx.font = "bold 10px monospace";
       ctx.textAlign = "center";
       ctx.fillText("N", 0, -(SIZE / 2 - 8));

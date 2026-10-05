@@ -5,6 +5,8 @@ import { texGlow, texBeam } from "./textures";
 import { trackedCanvasTexture } from "./memory";
 
 // ─── Billboard sprite system — 9-frame Doom rotation + mirrored reflection ──
+// CELESTIAL EDITION: every product now wears a golden halo and stands in a
+// column of sanctum light.
 
 const SPRITE_VERT = /* glsl */ `
   uniform float uFrame;
@@ -87,17 +89,20 @@ function makeTag(spec: ProductSpec, qty: number): HTMLCanvasElement {
   c.width = 160;
   c.height = 56;
   const ctx = c.getContext("2d")!;
-  ctx.fillStyle = "rgba(8,12,14,0.78)";
+  ctx.fillStyle = "rgba(22,18,10,0.82)";
   ctx.fillRect(0, 8, 160, 40);
   ctx.strokeStyle = `#${spec.accent.toString(16).padStart(6, "0")}`;
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 9, 158, 38);
+  ctx.strokeStyle = "rgba(255,224,150,0.4)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(3, 11, 154, 34);
   ctx.font = "bold 17px monospace";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#e8f6f3";
+  ctx.fillStyle = "#f7f0dd";
   ctx.fillText(spec.name.slice(0, 15), 80, 22);
-  ctx.fillStyle = "#fbbf24";
+  ctx.fillStyle = "#ffd98c";
   ctx.fillText(
     qty > 0 ? `CRED ${spec.price} [x${qty}]` : `CRED ${spec.price}`,
     80,
@@ -112,6 +117,8 @@ export class ProductSprite {
   readonly ring: THREE.Mesh;
   readonly beam: THREE.Mesh;
   readonly tag: THREE.Sprite;
+  readonly halo: THREE.Mesh;
+  readonly haloGlow: THREE.Sprite;
   readonly group = new THREE.Group();
   readonly spec: ProductSpec;
 
@@ -119,6 +126,7 @@ export class ProductSprite {
   private rmat: THREE.ShaderMaterial;
   private tagCanvas: HTMLCanvasElement;
   private tagTex: THREE.CanvasTexture;
+  private haloMat: THREE.MeshStandardMaterial;
   private frame = 0;
   private hover = false;
   private bob = Math.random() * Math.PI * 2;
@@ -162,7 +170,7 @@ export class ProductSprite {
     // glow ring on the pedestal
     const ringMat = new THREE.MeshBasicMaterial({
       map: ringTexture(),
-      color: spec.accent,
+      color: new THREE.Color(spec.accent).multiplyScalar(1.6),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -175,14 +183,14 @@ export class ProductSprite {
     this.ring.scale.set(1.15, 1.15, 1);
     this.ring.renderOrder = 4;
 
-    // hologram beam behind the product
+    // sanctum light column behind the product
     const beamMat = new THREE.MeshBasicMaterial({
       map: beamTexture(),
-      color: spec.accent,
+      color: new THREE.Color(spec.accent).lerp(new THREE.Color(0xffd98c), 0.45).multiplyScalar(1.5),
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      opacity: 0.16,
+      opacity: 0.18,
       side: THREE.DoubleSide,
       fog: true,
     });
@@ -190,6 +198,35 @@ export class ProductSprite {
     this.beam.scale.set(spec.spriteW * 1.5, pedestalTop - floorY + spec.spriteH * 1.6, 1);
     this.beam.position.set(0, (pedestalTop + floorY + spec.spriteH) * 0.5 - 0.2, -0.28);
     this.beam.renderOrder = 1;
+
+    // golden halo floating above the product — big enough to read at distance
+    this.haloMat = new THREE.MeshStandardMaterial({
+      color: 0xffe4a8,
+      metalness: 1.0,
+      roughness: 0.18,
+      emissive: 0xc98a20,
+      emissiveIntensity: 2.2,
+    });
+    const haloR = Math.max(0.18, Math.min(spec.spriteW, spec.spriteH) * 0.34);
+    this.halo = new THREE.Mesh(new THREE.TorusGeometry(haloR, haloR * 0.13, 10, 28), this.haloMat);
+    this.halo.rotation.x = Math.PI / 2 + 0.16;
+    this.halo.position.set(0, this.baseY + planeH * 0.5 + 0.42, 0);
+
+    // soft golden aura behind the halo — reads at any distance
+    this.haloGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: ringTexture(),
+        color: new THREE.Color(0xffdf9a).multiplyScalar(1.5),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        opacity: 0.5,
+        fog: true,
+      })
+    );
+    this.haloGlow.scale.set(haloR * 5.2, haloR * 5.2, 1);
+    this.haloGlow.position.set(0, this.baseY + planeH * 0.5 + 0.42, 0);
+    this.haloGlow.renderOrder = 5;
 
     // floating price tag
     this.tagCanvas = makeTag(spec, 0);
@@ -208,11 +245,13 @@ export class ProductSprite {
 
     this.group.position.copy(pos);
     this.group.rotation.y = facing;
-    this.group.add(this.mesh, this.reflection, this.ring, this.beam, this.tag);
+    this.group.add(this.mesh, this.reflection, this.ring, this.beam, this.halo, this.haloGlow, this.tag);
   }
 
   setHover(h: boolean) {
     this.hover = h;
+    this.haloMat.emissiveIntensity = h ? 4.0 : 2.2;
+    (this.haloGlow.material as THREE.SpriteMaterial).opacity = h ? 0.85 : 0.5;
   }
 
   updateTag(qty: number) {
@@ -258,6 +297,14 @@ export class ProductSprite {
     const bobY = Math.sin(this.bob) * (this.hover ? 0.045 : 0.014);
     this.mesh.position.y = this.baseY + bobY;
     this.tag.position.y = this.baseY + this.mesh.scale.y * 0.5 + 0.3 + Math.sin(this.bob * 0.8) * 0.03;
+    // halo floats and wobbles above the crown
+    this.halo.position.y = this.baseY + this.mesh.scale.y * 0.5 + 0.42 + bobY * 0.6;
+    this.haloGlow.position.y = this.halo.position.y;
+    this.halo.rotation.z = Math.sin(t * 1.3 + this.bob * 0.2) * 0.22;
+    this.halo.rotation.y += dt * 0.6;
+    const hov = this.hover ? 1.18 : 1.0;
+    const hs = hov + Math.sin(t * 2.2 + this.bob) * 0.04;
+    this.halo.scale.set(hs, hs, 1);
 
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;
     const pulse = this.hover ? 0.75 + 0.25 * Math.sin(t * 6) : 0.42;
@@ -266,7 +313,7 @@ export class ProductSprite {
     this.ring.scale.set(rs, rs, 1);
 
     const beamMat = this.beam.material as THREE.MeshBasicMaterial;
-    beamMat.opacity = this.hover ? 0.3 + 0.1 * Math.sin(t * 4) : 0.14;
+    beamMat.opacity = this.hover ? 0.32 + 0.1 * Math.sin(t * 4) : 0.17;
   }
 
   dispose() {
@@ -276,6 +323,9 @@ export class ProductSprite {
     (this.beam.material as THREE.Material).dispose();
     (this.tag.material as THREE.Material).dispose();
     this.tagTex.dispose();
+    this.haloMat.dispose();
+    this.halo.geometry.dispose();
+    (this.haloGlow.material as THREE.Material).dispose();
     this.ring.geometry.dispose();
   }
 }

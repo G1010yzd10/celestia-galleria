@@ -1,4 +1,8 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildLevel, FLOOR_Y, type LevelRig } from "./level";
 import { CATALOG, type ProductSpec } from "./products";
 import { bakeProduct, sheetToAtlas, type BakedProduct } from "./baker";
@@ -7,7 +11,9 @@ import { DoomAudio } from "./audio";
 import { mem, trackedCanvasTexture } from "./memory";
 import type { EngineStats } from "./types";
 
-// ─── DOOM MART engine — one WebGL context, Doom-grade lightness ─────────────
+// ─── DOOM MART CELESTIA — one WebGL context, temple-of-retail pipeline ───────
+// ACES filmic tone mapping + Unreal bloom (quarter-res chain) + a true planar
+// mirror floor — still Doom-grade lightness, still the 4 MB club.
 
 export interface EngineCallbacks {
   onStats?: (s: EngineStats) => void;
@@ -23,6 +29,8 @@ const RUN = 5.7;
 
 export class DoomEngine {
   private renderer: THREE.WebGLRenderer;
+  private composer: EffectComposer;
+  private bloom: UnrealBloomPass;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private level!: LevelRig;
@@ -35,6 +43,15 @@ export class DoomEngine {
   private t = 0;
   private paused = false;
   private disposed = false;
+
+  // adaptive quality — the Doom way: run beautifully on GPUs, gracefully
+  // everywhere else (SwiftShader, weak iGPUs). Auto-degrades after a warmup.
+  private quality: "ultra" | "lite" = "ultra";
+  private mirrorOn = true;
+  private lowFpsStreak = 0;
+  private qualityWarmup = 3.0; // REAL seconds before auto-degrade may trigger
+  private realT = 0; // wall-clock time (immune to the dt cap)
+  private qualityLocked = false; // E2E/testing: freeze the current tier
 
   // input state
   private keys = new Set<string>();
@@ -76,7 +93,7 @@ export class DoomEngine {
   private onKeyUp: (e: KeyboardEvent) => void;
   private onMouseMove: (e: MouseEvent) => void;
   private onMouseDown: (e: MouseEvent) => void;
-  private onMouseUp: (e: MouseEvent) => void;
+  private onMouseUp: () => void;
   private onLockChange: () => void;
   private onResize: () => void;
   private onTouchStart: (e: TouchEvent) => void;
@@ -93,12 +110,18 @@ export class DoomEngine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.camera = new THREE.PerspectiveCamera(74, 1, 0.08, 60);
+    // AAA-grade filmic response — highlights roll off like heaven, not clip
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.98;
+    // composer-owned frame: we reset stats manually once per frame
+    this.renderer.info.autoReset = false;
+
+    this.camera = new THREE.PerspectiveCamera(74, 1, 0.08, 70);
     this.camera.rotation.order = "YXZ";
 
     // ── world ──
-    this.scene.fog = new THREE.FogExp2(0x05070a, 0.05);
-    this.scene.background = new THREE.Color(0x05070a);
+    this.scene.fog = new THREE.FogExp2(0xe9eef0, 0.03);
+    this.scene.background = new THREE.Color(0xdcedf0);
     this.level = buildLevel();
     this.scene.add(this.level.group);
 
@@ -122,6 +145,18 @@ export class DoomEngine {
       this.scene.add(sprite.group);
       this.sprites.push(sprite);
     }
+
+    // ── post pipeline: render → Unreal bloom → filmic output ──
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(
+      new THREE.Vector2(360, 360),
+      0.42, // strength — restrained divine glow
+      0.55, // radius
+      0.88 // threshold — only true light blooms
+    );
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
 
     // ── spawn ──
     this.pos.set(this.level.spawn.x, EYE, this.level.spawn.z);
@@ -233,6 +268,13 @@ export class DoomEngine {
           meshY: +s.mesh.position.y.toFixed(2),
         })),
       prompt: () => this.promptSpec?.id ?? null,
+      vram: () => +mem.usedMB.toFixed(3),
+      quality: () => this.quality,
+      setQuality: (q: "ultra" | "lite") => this.setQuality(q),
+      lockQuality: () => {
+        this.qualityLocked = true;
+        return this.quality;
+      },
     };
   }
 
@@ -241,6 +283,24 @@ export class DoomEngine {
     this.paused = p;
     if (p && this.locked) document.exitPointerLock?.();
     if (!p) this.keys.clear();
+  }
+
+  /** force a quality tier ("ultra" = mirror floor + bloom; "lite" = lean) */
+  setQuality(q: "ultra" | "lite") {
+    if (q === this.quality) return;
+    this.quality = q;
+    const ultra = q === "ultra";
+    this.mirrorOn = ultra;
+    this.level.setMirror(ultra);
+    this.bloom.enabled = ultra;
+    const pr = ultra ? Math.min(window.devicePixelRatio, 1.75) : 1;
+    this.renderer.setPixelRatio(pr);
+    this.composer.setPixelRatio(pr);
+    this.resize();
+  }
+
+  getQuality() {
+    return this.quality;
   }
 
   setMoveInput(x: number, y: number) {
@@ -294,12 +354,26 @@ export class DoomEngine {
     const loop = () => {
       if (this.disposed) return;
       this.raf = requestAnimationFrame(loop);
-      const dt = Math.min(0.05, this.clock.getDelta());
+      const realDt = this.clock.getDelta();
+      const dt = Math.min(0.05, realDt);
       this.t += dt;
+      this.realT += realDt;
       this.update(dt);
-      this.renderer.render(this.scene, this.camera);
+      // manual stats reset: one honest count for the whole composed frame
+      this.renderer.info.reset();
+      // 1) floor mirror pass (renders the reflected world into the marble)
+      if (this.mirrorOn) {
+        this.level.renderReflection(
+          this.renderer,
+          this.scene,
+          this.camera,
+          this.sprites.map((s) => s.reflection) // hide fake pedestal mirrors
+        );
+      }
+      // 2) main pass: scene → bloom → ACES filmic output
+      this.composer.render();
       this.frames++;
-      this.statAcc += dt;
+      this.statAcc += realDt;
       if (this.statAcc >= 0.5) {
         this.emitStats();
         this.statAcc = 0;
@@ -331,6 +405,8 @@ export class DoomEngine {
       if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
       else if (mat) mat.dispose();
     });
+    this.bloom.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
     mem.reset();
   }
@@ -342,6 +418,7 @@ export class DoomEngine {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    this.composer.setSize(w, h);
   }
 
   private update(dt: number) {
@@ -464,8 +541,9 @@ export class DoomEngine {
   }
 
   private emitStats() {
+    const fps = Math.round(this.frames / Math.max(0.001, this.statAcc));
     this.lastStats = {
-      fps: Math.round(this.frames / Math.max(0.001, this.statAcc)),
+      fps,
       vramMB: mem.usedMB,
       drawCalls: this.renderer.info.render.calls,
       sprites: this.sprites.length,
@@ -473,6 +551,15 @@ export class DoomEngine {
       pz: this.pos.z,
       yaw: this.yaw,
     };
+    // adaptive quality governor: sustained low fps after warmup → lite tier
+    if (this.realT > this.qualityWarmup && this.quality === "ultra" && !this.qualityLocked) {
+      if (fps < 26) {
+        this.lowFpsStreak++;
+        if (this.lowFpsStreak >= 4) this.setQuality("lite");
+      } else {
+        this.lowFpsStreak = 0;
+      }
+    }
     this.cb.onStats?.(this.lastStats);
   }
 }

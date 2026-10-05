@@ -13,26 +13,34 @@ function MoodFace({ count }: { count: number }) {
     if (!c) return;
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, 24, 24);
-    ctx.fillStyle = "#caa27a";
-    ctx.fillRect(4, 3, 16, 18); // face
-    ctx.fillStyle = "#2a1a10";
-    ctx.fillRect(7, 9, 3, 3); // eyes
-    ctx.fillRect(14, 9, 3, 3);
-    ctx.fillStyle = "#7c2d12";
-    // brows angrier with more shopping
-    ctx.fillRect(6, 6 + mood, 5, 1);
-    ctx.fillRect(13, 6 + mood, 5, 1);
-    // mouth per mood
-    if (mood === 0) ctx.fillRect(8, 17, 8, 1);
-    else if (mood === 1) ctx.fillRect(8, 16, 8, 2);
+    // golden halo grows with devotion (cart size)
+    if (mood > 0) {
+      ctx.strokeStyle = `rgba(255,214,120,${0.45 + mood * 0.18})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(12, 3.4, 5 + mood * 1.6, 1.6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#e8c9a0";
+    ctx.fillRect(4, 4, 16, 17); // face
+    ctx.fillStyle = "#3a2a16";
+    ctx.fillRect(7, 10, 3, 3); // eyes
+    ctx.fillRect(14, 10, 3, 3);
+    // serene brows rise with devotion
+    ctx.fillStyle = "#8a5a24";
+    ctx.fillRect(6, 7 - mood, 5, 1);
+    ctx.fillRect(13, 7 - mood, 5, 1);
+    // mouth per mood — from neutral to blessed grin
+    if (mood === 0) ctx.fillRect(8, 18, 8, 1);
+    else if (mood === 1) ctx.fillRect(8, 17, 8, 2);
     else if (mood === 2) {
-      ctx.fillRect(7, 15, 10, 3);
-      ctx.fillStyle = "#caa27a";
-      ctx.fillRect(8, 15, 8, 1);
+      ctx.fillRect(7, 16, 10, 3);
+      ctx.fillStyle = "#e8c9a0";
+      ctx.fillRect(8, 16, 8, 1);
     } else {
-      ctx.fillRect(6, 14, 12, 4);
-      ctx.fillStyle = "#1c0f08";
-      ctx.fillRect(7, 15, 10, 2);
+      ctx.fillRect(6, 15, 12, 4);
+      ctx.fillStyle = "#5a3010";
+      ctx.fillRect(7, 16, 10, 2);
     }
   }, [mood]);
   return (
@@ -41,7 +49,7 @@ function MoodFace({ count }: { count: number }) {
       width={24}
       height={24}
       aria-hidden
-      className="w-10 h-10 md:w-12 md:h-12 [image-rendering:pixelated] border border-neutral-700 bg-neutral-900"
+      className="w-10 h-10 md:w-12 md:h-12 [image-rendering:pixelated] border border-amber-800/70 bg-[#161006]"
     />
   );
 }
@@ -80,44 +88,44 @@ export function HudBar({
           {/* face */}
           <div className="hidden sm:flex flex-col items-center justify-center px-1">
             <MoodFace count={count} />
-            <span className="text-[8px] text-neutral-500 tracking-widest">SHOPPER</span>
+            <span className="text-[8px] text-amber-700 tracking-widest">PILGRIM</span>
           </div>
 
           {/* cart count */}
-          <div className="flex flex-col items-center justify-center min-w-[64px] md:min-w-[90px] px-2 border border-neutral-700/70 bg-black/50">
-            <span className="text-[9px] md:text-[10px] text-neutral-400 tracking-[0.25em]">CART</span>
+          <div className="flex flex-col items-center justify-center min-w-[64px] md:min-w-[90px] px-2 border border-amber-900/60 bg-[#140e04]/80">
+            <span className="text-[9px] md:text-[10px] text-amber-600/90 tracking-[0.25em]">CART</span>
             <span
               className="text-2xl md:text-4xl font-black tabular-nums"
-              style={{ color: "#ff4436", textShadow: "0 0 10px rgba(255,68,54,0.6)" }}
+              style={{ color: "#ffb44d", textShadow: "0 0 12px rgba(255,180,77,0.65)" }}
             >
               {String(count).padStart(2, "0")}
             </span>
           </div>
 
           {/* credits */}
-          <div className="flex flex-col items-center justify-center min-w-[80px] md:min-w-[120px] px-2 border border-neutral-700/70 bg-black/50">
-            <span className="text-[9px] md:text-[10px] text-neutral-400 tracking-[0.25em]">CREDITS</span>
+          <div className="flex flex-col items-center justify-center min-w-[80px] md:min-w-[120px] px-2 border border-amber-900/60 bg-[#140e04]/80">
+            <span className="text-[9px] md:text-[10px] text-amber-600/90 tracking-[0.25em]">CREDITS</span>
             <span
               className="text-lg md:text-3xl font-black tabular-nums"
-              style={{ color: "#fbbf24", textShadow: "0 0 10px rgba(251,191,36,0.5)" }}
+              style={{ color: "#ffe9b0", textShadow: "0 0 12px rgba(255,233,176,0.55)" }}
             >
               {total.toLocaleString()}
             </span>
           </div>
 
           {/* vram */}
-          <div className="hidden md:flex flex-col justify-center min-w-[150px] px-2 border border-neutral-700/70 bg-black/50 gap-1">
-            <div className="flex justify-between text-[9px] text-neutral-400 tracking-[0.2em]">
+          <div className="hidden md:flex flex-col justify-center min-w-[150px] px-2 border border-amber-900/60 bg-[#140e04]/80 gap-1">
+            <div className="flex justify-between text-[9px] text-amber-600/90 tracking-[0.2em]">
               <span>VRAM</span>
               <span style={{ color: vramColor }}>{vram.toFixed(2)} / 4.00 MB</span>
             </div>
-            <div className="h-2.5 bg-neutral-800 border border-neutral-700 overflow-hidden">
+            <div className="h-2.5 bg-[#241a08] border border-amber-900/60 overflow-hidden">
               <div
                 className="h-full transition-all duration-500"
                 style={{ width: `${vramPct}%`, background: vramColor, boxShadow: `0 0 8px ${vramColor}` }}
               />
             </div>
-            <div className="flex justify-between text-[9px] text-neutral-500">
+            <div className="flex justify-between text-[9px] text-amber-800/80">
               <span>SPR {stats.sprites}</span>
               <span>DC {stats.drawCalls}</span>
             </div>
@@ -125,7 +133,7 @@ export function HudBar({
 
           {/* fps (compact) */}
           <div className="flex md:hidden flex-col items-center justify-center px-2">
-            <span className="text-[9px] text-neutral-400">FPS</span>
+            <span className="text-[9px] text-amber-600/90">FPS</span>
             <span className="text-base font-black tabular-nums" style={{ color: fpsColor }}>
               {stats.fps}
             </span>
@@ -150,7 +158,7 @@ export function HudBar({
             </button>
             <button
               onClick={onCart}
-              className="hud-btn !px-3 md:!px-5 !text-xs md:!text-sm !bg-gradient-to-b !from-amber-600 !to-red-700 !border-amber-500"
+              className="hud-btn !px-3 md:!px-5 !text-xs md:!text-sm !bg-gradient-to-b !from-amber-300 !via-amber-400 !to-amber-600 !border-amber-300 !text-[#241304] !font-bold"
               aria-label={`Open cart, ${count} items`}
             >
               🛒 <span className="hidden md:inline">CART</span> [{count}]

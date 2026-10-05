@@ -41,30 +41,37 @@ export class DoomAudio {
   private startAmbient() {
     if (!this.ctx || !this.master) return;
     const ctx = this.ctx;
-    // deep sector hum: two detuned saws through a lowpass
+    // seraph pad: A-major add9 cluster of detuned sines through a soft filter
     const g = ctx.createGain();
-    g.gain.value = 0.045;
+    g.gain.value = 0.028;
     const lp = ctx.createBiquadFilter();
     lp.type = "lowpass";
-    lp.frequency.value = 240;
+    lp.frequency.value = 1100;
+    lp.Q.value = 0.4;
     g.connect(lp).connect(this.master);
-    for (const f of [52, 52.7]) {
-      const o = ctx.createOscillator();
-      o.type = "sawtooth";
-      o.frequency.value = f;
-      o.connect(g);
-      o.start();
-      this.ambientNodes.push(o);
+    const pad = [110, 164.81, 220, 246.94, 277.18, 329.63];
+    for (const f of pad) {
+      for (const det of [-1.2, 1.2]) {
+        const o = ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.value = f;
+        o.detune.value = det;
+        const og = ctx.createGain();
+        og.gain.value = 1 / pad.length;
+        o.connect(og).connect(g);
+        o.start();
+        this.ambientNodes.push(o);
+      }
     }
-    // slow breathing LFO on the filter
+    // slow breathing LFO on the filter — the temple inhales
     const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.09;
+    lfo.frequency.value = 0.07;
     const lfoG = ctx.createGain();
-    lfoG.gain.value = 90;
+    lfoG.gain.value = 420;
     lfo.connect(lfoG).connect(lp.frequency);
     lfo.start();
     this.ambientNodes.push(lfo);
-    // faint air noise
+    // faint angelic shimmer (high air)
     const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const nd = noiseBuf.getChannelData(0);
     for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -73,10 +80,10 @@ export class DoomAudio {
     noise.loop = true;
     const nlp = ctx.createBiquadFilter();
     nlp.type = "bandpass";
-    nlp.frequency.value = 800;
-    nlp.Q.value = 0.4;
+    nlp.frequency.value = 2900;
+    nlp.Q.value = 0.5;
     const ng = ctx.createGain();
-    ng.gain.value = 0.012;
+    ng.gain.value = 0.006;
     noise.connect(nlp).connect(ng).connect(this.master);
     noise.start();
     this.ambientNodes.push(noise);
@@ -126,33 +133,38 @@ export class DoomAudio {
   }
 
   footstep() {
+    // polished marble click
     this.stepAlt = !this.stepAlt;
-    this.noiseBurst(0.09, this.stepAlt ? 170 : 150, 0.16, 0.9);
+    this.noiseBurst(0.05, this.stepAlt ? 260 : 225, 0.1, 3);
+    this.blip(this.stepAlt ? 96 : 88, 0.06, "sine", 0.05);
   }
 
   hover() {
-    this.blip(1240, 0.05, "square", 0.05);
+    this.blip(1568, 0.045, "sine", 0.035);
   }
 
   interact() {
-    this.blip(660, 0.09, "square", 0.09);
-    this.blip(990, 0.09, "square", 0.07, 0.07);
+    this.blip(784, 0.09, "sine", 0.08);
+    this.blip(1175, 0.09, "sine", 0.06, 0.07);
   }
 
-  /** Doom-style item pickup chime */
+  /** blessed pickup chime — bell partials */
   pickup() {
-    this.blip(523.25, 0.09, "triangle", 0.22);
-    this.blip(659.25, 0.09, "triangle", 0.22, 0.08);
-    this.blip(783.99, 0.14, "triangle", 0.24, 0.16);
+    this.blip(1046.5, 0.1, "sine", 0.2);
+    this.blip(1318.5, 0.1, "sine", 0.16, 0.08);
+    this.blip(1568, 0.16, "sine", 0.18, 0.16);
+    this.blip(2093, 0.2, "sine", 0.07, 0.16);
   }
 
   deny() {
-    this.blip(110, 0.16, "sawtooth", 0.14, 0, 70);
+    this.blip(130, 0.16, "triangle", 0.1, 0, 82);
   }
 
   checkout() {
-    const seq = [392, 523.25, 659.25, 783.99, 1046.5];
-    seq.forEach((f, i) => this.blip(f, 0.12, "triangle", 0.2, i * 0.09));
+    // ascending major arpeggio into the light
+    const seq = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    seq.forEach((f, i) => this.blip(f, 0.13, "sine", 0.18, i * 0.09));
+    this.blip(2093, 0.4, "sine", 0.06, 0.45);
   }
 
   splash() {
