@@ -32,7 +32,15 @@ function palette(): Uint8Array {
   return p;
 }
 
-export function TitleScreen({ onEnter }: { onEnter: () => void }) {
+export function TitleScreen({
+  onEnter,
+  onForge,
+  onAcademy,
+}: {
+  onEnter: () => void;
+  onForge: () => void;
+  onAcademy: () => void;
+}) {
   const fireRef = useRef<HTMLCanvasElement>(null);
   const [tab, setTab] = useState<"none" | "help" | "assets">("none");
 
@@ -139,7 +147,23 @@ export function TitleScreen({ onEnter }: { onEnter: () => void }) {
           ✦ ASCEND TO THE SHOP
         </Button>
 
-        <div className="flex gap-3 mt-4 font-mono text-xs">
+        {/* the creator's wing — forge your own sprites, learn the craft */}
+        <div className="flex gap-2 mt-4 font-mono text-xs">
+          <button
+            onClick={onForge}
+            className="px-3 py-1.5 border border-teal-700 text-teal-200 hover:border-teal-400 hover:text-teal-100 hover:bg-teal-950/40 tracking-widest"
+          >
+            ⚒ SPRITE FORGE
+          </button>
+          <button
+            onClick={onAcademy}
+            className="px-3 py-1.5 border border-amber-800 text-amber-200/90 hover:border-amber-500 hover:text-amber-100 hover:bg-amber-950/30 tracking-widest"
+          >
+            🎓 ACADEMY
+          </button>
+        </div>
+
+        <div className="flex gap-3 mt-3 font-mono text-xs">
           <button
             onClick={() => setTab(tab === "help" ? "none" : "help")}
             className="text-amber-200/80 hover:text-amber-100 underline underline-offset-4"
@@ -167,7 +191,7 @@ export function TitleScreen({ onEnter }: { onEnter: () => void }) {
         {tab === "assets" && (
           <div className="mt-4 max-w-md w-full bg-black/80 border border-amber-900/70 rounded p-4 font-mono text-xs text-neutral-300 space-y-1.5">
             <p>Products are <span className="text-amber-300">9-angle PNG sprite sheets</span> (Doom method).</p>
-            <p>Drop a <span className="text-teal-200">9-frame horizontal strip</span> onto the shop window to replace any product live — design your 2D art, upload, customers shop it in 3D.</p>
+            <p>Drop a <span className="text-teal-200">9-frame strip</span> onto the shop window to replace any product live — or open the <span className="text-teal-200">⚒ SPRITE FORGE</span> to upload, size and publish your own permanent relics.</p>
             <p>In-shop <span className="text-teal-200">ASSETS</span> button exports reference sheets.</p>
           </div>
         )}

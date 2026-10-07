@@ -23,6 +23,30 @@ export interface BakedProduct {
   radius: number;
 }
 
+/** scan an atlas canvas's alpha channel → content box fractions
+ *  [y0, y1, x0, x1] (y from TOP). Shared by the baker AND the Forge
+ *  pipeline so uploaded sprites ground pixel-perfect like baked ones. */
+export function scanAtlasContent(
+  atlas: HTMLCanvasElement
+): [number, number, number, number] {
+  const W = atlas.width;
+  const H = atlas.height;
+  const data = atlas.getContext("2d")!.getImageData(0, 0, W, H).data;
+  let minY = H, maxY = -1, minX = W, maxX = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (data[(y * W + x) * 4 + 3] > 24) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+  if (maxY < 0) { minY = 0; maxY = H - 1; minX = 0; maxX = W - 1; }
+  return [minY / H, (maxY + 1) / H, minX / W, (maxX + 1) / W];
+}
+
 /**
  * Bake one product id → sprite atlas.
  * Uses the live renderer with an offscreen render target; restores state after.
@@ -134,25 +158,7 @@ export function bakeProduct(
   mem.register(texture, atlas.width, atlas.height, true);
 
   // alpha content box across all 9 frames (for pixel-perfect grounding)
-  const data = actx.getImageData(0, 0, atlas.width, atlas.height).data;
-  let minY = FRAME, maxY = -1, minX = atlas.width, maxX = -1;
-  for (let y = 0; y < FRAME; y++) {
-    for (let x = 0; x < atlas.width; x++) {
-      if (data[(y * atlas.width + x) * 4 + 3] > 24) {
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-      }
-    }
-  }
-  if (maxY < 0) { minY = 0; maxY = FRAME - 1; minX = 0; maxX = atlas.width - 1; }
-  const content: [number, number, number, number] = [
-    minY / FRAME,
-    (maxY + 1) / FRAME,
-    minX / atlas.width,
-    (maxX + 1) / atlas.width,
-  ];
+  const content = scanAtlasContent(atlas);
 
   return { atlas, texture, content, radius: sphere.radius };
 }

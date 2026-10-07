@@ -10,6 +10,10 @@ import { ProductDialog } from "./ProductDialog";
 import { CartDrawer } from "./CartDrawer";
 import { TouchControls } from "./TouchControls";
 import { AssetDialog } from "./AssetDialog";
+import { Forge, specFromJSON } from "./Forge";
+import { Academy } from "./Academy";
+import { loadImage, toCanvas } from "@/lib/doom/forge";
+import type { CustomProductJSON } from "@/app/api/products/route";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export function DoomShop() {
@@ -36,8 +40,10 @@ export function DoomShop() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [pendingImage, setPendingImage] = useState<HTMLImageElement | null>(null);
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [academyOpen, setAcademyOpen] = useState(false);
 
-  const paused = !!selected || cartOpen || assetOpen || helpOpen;
+  const paused = !!selected || cartOpen || assetOpen || helpOpen || forgeOpen || academyOpen;
 
   // ── engine lifecycle (StrictMode-safe: full dispose on unmount) ──
   useEffect(() => {
@@ -52,12 +58,31 @@ export function DoomShop() {
     setEngine(eng);
     eng.start();
 
+    // ── restore persisted Forge relics onto their shrines (SQLite → 3D) ──
+    (async () => {
+      try {
+        const r = await fetch("/api/products");
+        const j = await r.json();
+        if (!j?.ok) return;
+        for (const p of j.products as CustomProductJSON[]) {
+          try {
+            const img = await loadImage(p.spriteUrl);
+            eng.addCustomProduct(specFromJSON(p), toCanvas(img));
+          } catch {
+            /* one missing atlas shouldn't stop the procession */
+          }
+        }
+      } catch {
+        /* API offline — the core temple still stands */
+      }
+    })();
+
     return () => {
       eng.dispose();
       engineRef.current = null;
       setEngine(null);
     };
-     
+    
   }, []);
 
   // pause engine while any modal is open
@@ -177,7 +202,13 @@ export function DoomShop() {
       <div className="pointer-events-none absolute inset-0 scanlines" />
       <div className="pointer-events-none absolute inset-0 vignette" />
 
-      {!started && <TitleScreen onEnter={enterShop} />}
+      {!started && (
+        <TitleScreen
+          onEnter={enterShop}
+          onForge={() => setForgeOpen(true)}
+          onAcademy={() => setAcademyOpen(true)}
+        />
+      )}
 
       {started && (
         <>
@@ -216,6 +247,8 @@ export function DoomShop() {
             onCart={() => setCartOpen(true)}
             onAssets={() => setAssetOpen(true)}
             onHelp={() => setHelpOpen(true)}
+            onForge={() => setForgeOpen(true)}
+            onAcademy={() => setAcademyOpen(true)}
           />
 
           {/* toast */}
@@ -238,6 +271,24 @@ export function DoomShop() {
         pendingImage={pendingImage}
         onConsumePending={() => setPendingImage(null)}
         onToast={toast}
+        onForge={() => {
+          setAssetOpen(false);
+          setForgeOpen(true);
+        }}
+      />
+      <Forge
+        open={forgeOpen}
+        onOpenChange={setForgeOpen}
+        engine={engine}
+        onToast={toast}
+      />
+      <Academy
+        open={academyOpen}
+        onOpenChange={setAcademyOpen}
+        onOpenForge={() => {
+          setAcademyOpen(false);
+          setForgeOpen(true);
+        }}
       />
 
       {/* help dialog */}

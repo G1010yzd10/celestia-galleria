@@ -58,10 +58,14 @@ export function HudBar({
   onCart,
   onAssets,
   onHelp,
+  onForge,
+  onAcademy,
 }: {
   onCart: () => void;
   onAssets: () => void;
   onHelp: () => void;
+  onForge: () => void;
+  onAcademy: () => void;
 }) {
   const stats = useShop((s) => s.stats);
   const cart = useShop((s) => s.cart);
@@ -153,6 +157,23 @@ export function HudBar({
               className="hud-btn"
             >
               {soundOn ? "🔊" : "🔇"}
+            </button>
+            <button
+              onClick={onForge}
+              aria-label="Sprite Forge — upload your own sprites"
+              title="SPRITE FORGE — upload & size your own sprites"
+              className="hud-btn"
+              style={{ borderColor: "#2dd4bf88", color: "#9ff5ec" }}
+            >
+              ⚒
+            </button>
+            <button
+              onClick={onAcademy}
+              aria-label="Sprite Academy tutorial"
+              title="ACADEMY — the 9-angle tutorial"
+              className="hud-btn"
+            >
+              🎓
             </button>
             <button onClick={onAssets} aria-label="Asset pipeline" className="hud-btn hidden sm:block">
               🖼

@@ -43,12 +43,15 @@ export interface LevelGrid {
 
 export const CELL = 1.2;
 
-/** 16 × 14 arena — '#' wall, '.' floor, '~' lagoon, 'P' pedestal */
+/** 16 × 14 arena — '#' wall, '.' floor, '~' lagoon, 'P' pedestal, '^' spawn
+ *  Rows 1 & 3 hold the FORGE SHRINES: six extra pedestals reserved for
+ *  pilgrim-uploaded sprites (row 11's pair is freed by the two new catalog
+ *  relics — see level.ts for the assignment order). */
 export const MAP_ART = [
   "################",
-  "#..............#",
+  "#...P.P.P.P...#", // north gallery — custom shrines 3..6
   "#..P........P..#",
-  "#..............#",
+  "#...P.P.P.P...#", // poolside — catalog overflow row
   "#...~~~~~~~~...#",
   "#...~~~~~~~~...#",
   "#...~~~~~~~~...#",
@@ -56,7 +59,7 @@ export const MAP_ART = [
   "#..............#",
   "#..P.......P...#",
   "#..............#",
-  "#..P........P..#",
+  "#..P........P..#", // south pair — custom shrines 1..2
   "#......^.......#", // ^ = spawn
   "################",
 ];

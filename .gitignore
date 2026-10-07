@@ -1,2 +1,22 @@
+# ─── CELESTIA GALLERIA ✦ — what the reliquary keeps out ────────────────────
 skills/
 node_modules/
+
+# build artifacts & caches
+.next/
+out/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# runtime state — the temple rebuilds these on boot
+dev.log
+server.log
+db/*.db
+db/*.db-wal
+db/*.db-shm
+public/uploads/
+
+# agent scratch space
+tool-results/
+private/
+download/

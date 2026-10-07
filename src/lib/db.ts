@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 
 // ─── SQLite via node:sqlite — zero-dependency, Doom-grade lean ───────────
 // No ORM, no query compiler, no native add-on: the driver ships inside the
-// runtime itself (Node 24 / Bun 1.3+). One file, one table, honest SQL.
+// runtime itself (Node 24 / Bun 1.3+). One file, honest SQL.
 // CELESTIA GALLERIA keeps the Prisma exorcism permanent.
 
 const DB_PATH =
@@ -20,6 +20,28 @@ export interface OrderRow {
   created_at: number;
 }
 
+// ── The Sprite Forge: pilgrim-uploaded 9-angle products, persisted ──
+export interface CustomProductRow {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  blurb: string;
+  /** hex accent for halo / ring / holo tint, e.g. "#2dd4bf" */
+  accent: string;
+  /** world display size in meters — the sofa-is-big mug-is-small control */
+  sprite_w: number;
+  sprite_h: number;
+  /** atlas png filename inside UPLOADS_DIR */
+  atlas_file: string;
+  created_at: number;
+}
+
+/** how many empty shrines the temple holds for custom sprites */
+export const MAX_CUSTOM_PRODUCTS = 6;
+
+export const UPLOADS_DIR = "public/uploads/sprites";
+
 function migrate(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS orders (
@@ -28,6 +50,20 @@ function migrate(db: DatabaseSync) {
       items      TEXT NOT NULL,
       total      REAL NOT NULL,
       credits    INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS custom_products (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      category   TEXT NOT NULL DEFAULT 'CURATED',
+      price      REAL NOT NULL DEFAULT 99,
+      blurb      TEXT NOT NULL DEFAULT '',
+      accent     TEXT NOT NULL DEFAULT '#2dd4bf',
+      sprite_w   REAL NOT NULL DEFAULT 0.9,
+      sprite_h   REAL NOT NULL DEFAULT 0.9,
+      atlas_file TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
   `);
@@ -68,6 +104,13 @@ function openDb(): DatabaseSync {
 }
 
 export const db: DatabaseSync = globalForSqlite.__doomSqlite ?? openDb();
+// idempotent DDL — re-run on every (re)load so a hot-reloaded module that
+// receives a CACHED connection still gets freshly-added tables.
+try {
+  migrate(db);
+} catch {
+  /* hot-reload race with a concurrent migrate — the table check is IF NOT EXISTS */
+}
 if (process.env.NODE_ENV !== "production") globalForSqlite.__doomSqlite = db;
 
 export function insertOrder(
@@ -85,4 +128,90 @@ export function countOrders(): number {
     | { n: number }
     | undefined;
   return r?.n ?? 0;
+}
+
+// ── Sprite Forge CRUD ───────────────────────────────────────────────────────
+
+export function listCustomProducts(): CustomProductRow[] {
+  return db
+    .prepare("SELECT * FROM custom_products ORDER BY created_at ASC")
+    .all() as CustomProductRow[];
+}
+
+export function getCustomProduct(id: string): CustomProductRow | undefined {
+  return db
+    .prepare("SELECT * FROM custom_products WHERE id = ?")
+    .get(id) as CustomProductRow | undefined;
+}
+
+export function countCustomProducts(): number {
+  const r = db.prepare("SELECT COUNT(*) AS n FROM custom_products").get() as
+    | { n: number }
+    | undefined;
+  return r?.n ?? 0;
+}
+
+/** place a freshly forged sprite on an empty shrine (caller saves the PNG) */
+export function insertCustomProduct(
+  p: Omit<CustomProductRow, "id" | "created_at">
+): CustomProductRow {
+  const row: CustomProductRow = {
+    id: `forge-${randomUUID().slice(0, 8)}`,
+    created_at: Date.now(),
+    ...p,
+  };
+  db.prepare(
+    `INSERT INTO custom_products
+       (id, name, category, price, blurb, accent, sprite_w, sprite_h, atlas_file, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    row.id,
+    row.name,
+    row.category,
+    row.price,
+    row.blurb,
+    row.accent,
+    row.sprite_w,
+    row.sprite_h,
+    row.atlas_file,
+    row.created_at
+  );
+  return row;
+}
+
+/** the live size control — resize a shrine resident without reload */
+export function updateCustomProduct(
+  id: string,
+  patch: Partial<
+    Pick<
+      CustomProductRow,
+      "name" | "category" | "price" | "blurb" | "accent" | "sprite_w" | "sprite_h"
+    >
+  >
+): CustomProductRow | undefined {
+  const cur = getCustomProduct(id);
+  if (!cur) return undefined;
+  const next = { ...cur, ...patch };
+  db.prepare(
+    `UPDATE custom_products
+       SET name = ?, category = ?, price = ?, blurb = ?, accent = ?,
+           sprite_w = ?, sprite_h = ?
+     WHERE id = ?`
+  ).run(
+    next.name,
+    next.category,
+    next.price,
+    next.blurb,
+    next.accent,
+    next.sprite_w,
+    next.sprite_h,
+    id
+  );
+  return next;
+}
+
+/** retire a shrine resident (caller removes the atlas file) */
+export function deleteCustomProduct(id: string): boolean {
+  const r = db.prepare("DELETE FROM custom_products WHERE id = ?").run(id);
+  return r.changes > 0;
 }

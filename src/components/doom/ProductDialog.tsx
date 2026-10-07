@@ -104,6 +104,12 @@ export function ProductDialog({
               {selected.price.toLocaleString()}
               <span className="text-sm text-neutral-500 ml-1">CRED</span>
             </div>
+            <div
+              className="text-[10px] text-teal-300/90 tabular-nums mt-1 tracking-wider"
+              title="World size on the shrine — set in the Sprite Forge"
+            >
+              ⤢ WORLD SIZE {selected.spriteW.toFixed(2)}m × {selected.spriteH.toFixed(2)}m
+            </div>
           </div>
 
           <div className="flex items-center gap-2">

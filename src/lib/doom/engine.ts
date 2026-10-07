@@ -5,7 +5,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildLevel, FLOOR_Y, type LevelRig } from "./level";
 import { CATALOG } from "./products";
-import { bakeProduct, sheetToAtlas, type BakedProduct } from "./baker";
+import { bakeProduct, sheetToAtlas, scanAtlasContent, type BakedProduct } from "./baker";
 import { ProductSprite } from "./sprites";
 import { DoomAudio } from "./audio";
 import { mem, trackedCanvasTexture } from "./memory";
@@ -37,6 +37,8 @@ export class DoomEngine {
   private level!: LevelRig;
   private sprites: ProductSprite[] = [];
   private baked = new Map<string, BakedProduct>();
+  /** shrine occupancy: product id → pedestal index (Forge slot tracking) */
+  private usedPedestals = new Map<string, number>();
   readonly audio = new DoomAudio();
 
   private raf = 0;
@@ -148,6 +150,7 @@ export class DoomEngine {
       sprite.setHover(false);
       this.scene.add(sprite.group);
       this.sprites.push(sprite);
+      this.usedPedestals.set(spec.id, i);
     }
 
     // ── post pipeline: render → Unreal bloom → filmic output ──
@@ -293,6 +296,8 @@ export class DoomEngine {
         this.qualityLocked = true;
         return this.quality;
       },
+      shrines: () => ({ free: this.freeShrines(), total: this.level.pedestals.length }),
+      sprites: () => this.sprites.map((s) => s.spec.id),
     };
   }
 
@@ -351,8 +356,87 @@ export class DoomEngine {
     if (!sprite) return false;
     const atlas = sheetToAtlas(img);
     const tex = trackedCanvasTexture(atlas, true);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    sprite.swapTexture(tex);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    const content = scanAtlasContent(atlas);
+    sprite.swapTexture(tex, content);
+    const b = this.baked.get(productId);
+    if (b) {
+      b.atlas = atlas;
+      b.texture = tex;
+      b.content = content;
+    }
+    return true;
+  }
+
+  // ── THE SPRITE FORGE — pilgrim-uploaded relics take their shrines ──
+
+  /** empty shrine count ( pedestals minus residents ) */
+  freeShrines(): number {
+    return Math.max(0, this.level.pedestals.length - this.sprites.length);
+  }
+
+  /** place a custom 9-frame atlas (already composed by the Forge) on an
+   *  empty shrine — returns false when the temple is full */
+  addCustomProduct(spec: ProductSpec, atlas: HTMLCanvasElement): boolean {
+    if (this.sprites.find((s) => s.spec.id === spec.id)) return true; // idempotent
+    const taken = new Set(this.usedPedestals.values());
+    let freeIdx = -1;
+    for (let i = 0; i < this.level.pedestals.length; i++) {
+      if (!taken.has(i)) {
+        freeIdx = i;
+        break;
+      }
+    }
+    if (freeIdx < 0) return false;
+    const ped = this.level.pedestals[freeIdx];
+    const tex = trackedCanvasTexture(atlas, true);
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
+    const content = scanAtlasContent(atlas);
+    const sprite = new ProductSprite(
+      spec,
+      tex,
+      content,
+      ped.pos,
+      ped.facing,
+      FLOOR_Y,
+      ped.top
+    );
+    sprite.setHover(false);
+    this.scene.add(sprite.group);
+    this.sprites.push(sprite);
+    this.usedPedestals.set(spec.id, freeIdx);
+    this.baked.set(spec.id, {
+      atlas,
+      texture: tex,
+      content,
+      radius: Math.max(spec.spriteW, spec.spriteH) * 0.5,
+    });
+    return true;
+  }
+
+  /** live world-size control — sofa big, mug small, mid-walk */
+  resizeProduct(productId: string, w: number, h: number): boolean {
+    const sprite = this.sprites.find((s) => s.spec.id === productId);
+    if (!sprite) return false;
+    sprite.applySize(
+      Math.max(0.08, Math.min(6, w)),
+      Math.max(0.08, Math.min(6, h))
+    );
+    return true;
+  }
+
+  /** retire a custom relic — frees its shrine and VRAM */
+  removeProduct(productId: string): boolean {
+    const idx = this.sprites.findIndex((s) => s.spec.id === productId);
+    if (idx < 0) return false;
+    const sprite = this.sprites[idx];
+    this.scene.remove(sprite.group);
+    sprite.dispose();
+    this.sprites.splice(idx, 1);
+    this.usedPedestals.delete(productId);
+    this.baked.delete(productId);
     return true;
   }
 

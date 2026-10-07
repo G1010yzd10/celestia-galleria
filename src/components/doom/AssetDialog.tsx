@@ -24,6 +24,7 @@ export function AssetDialog({
   pendingImage,
   onConsumePending,
   onToast,
+  onForge,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -31,6 +32,7 @@ export function AssetDialog({
   pendingImage: HTMLImageElement | null;
   onConsumePending: () => void;
   onToast: (msg: string) => void;
+  onForge: () => void;
 }) {
   const [target, setTarget] = useState<string | null>(null);
 
@@ -128,6 +130,23 @@ export function AssetDialog({
               <div className="text-[11px] text-neutral-500 mt-1">
                 The sheet will be sliced live and replace any product instantly —
                 no reload, no rebuild.
+              </div>
+            </div>
+
+            {/* the full studio — persistent relics with world size */}
+            <div className="border border-amber-800/60 bg-amber-950/20 p-3 text-center space-y-2">
+              <div className="text-amber-300 text-xs font-bold tracking-wider">
+                WANT IT PERMANENT, SIZED &amp; SELLABLE?
+              </div>
+              <Button
+                onClick={onForge}
+                className="bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 hover:from-amber-200 !text-[#241304] font-bold tracking-widest text-xs"
+              >
+                ⚒ OPEN THE SPRITE FORGE
+              </Button>
+              <div className="text-[10px] text-neutral-500">
+                upload · background removal · live spin preview · world-size dial (sofa big,
+                mug small) · persistent shrine residents
               </div>
             </div>
 

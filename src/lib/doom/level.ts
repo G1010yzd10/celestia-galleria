@@ -719,6 +719,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     [15.0, 3.0, 0.5, 0.15, -0.03, 0.02],
     [4.2, 13.8, 0.55, 0.12, 0.02, 0.03],
     [15.0, 13.8, 0.55, 0.12, -0.02, -0.03],
+    [9.0, 1.8, 0.9, 0.11, 0.02, -0.02], // north gallery — the Forge shrines
   ];
   for (let i = 0; i < shaftSpecs.length; i++) {
     const [sx, sz, r, inten, tz, tx] = shaftSpecs[i];
@@ -796,19 +797,28 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   });
   const spawn = { x: 7 * CELL + CELL / 2, z: 12 * CELL + CELL / 2, yaw: 0 };
   const pedestals: PedestalInfo[] = [];
-  for (let row = 0; row < grid.h; row++) {
-    for (let col = 0; col < grid.w; col++) {
-      if (grid.cells[row * grid.w + col] !== 3) continue;
-      const px = col * CELL + CELL / 2;
-      const pz = row * CELL + CELL / 2;
-      const ped = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE, PED_TOP - 0.02, PED_SIZE), pedMat);
-      ped.position.set(px, (PED_TOP - 0.02) / 2, pz);
-      group.add(ped);
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE + 0.05, 0.025, PED_SIZE + 0.05), capMat);
-      cap.position.set(px, PED_TOP - 0.012, pz);
-      group.add(cap);
-      const facing = Math.atan2(spawn.x - px, spawn.z - pz);
-      pedestals.push({ col, row, pos: new THREE.Vector3(px, 0, pz), facing, top: PED_TOP });
+  // two passes so the FORGE SHRINES land at the END of the array: catalog
+  // relics claim the core temple first, custom uploads fill the north
+  // gallery + freed south pair afterwards (engine tracks occupancy).
+  const pedestalPasses: [number, number][] = [
+    [2, grid.h - 1], // core temple (rows 2..h-1)
+    [0, 2], // north gallery forge shrines (rows 0..1)
+  ];
+  for (const [rowStart, rowEnd] of pedestalPasses) {
+    for (let row = rowStart; row < rowEnd; row++) {
+      for (let col = 0; col < grid.w; col++) {
+        if (grid.cells[row * grid.w + col] !== 3) continue;
+        const px = col * CELL + CELL / 2;
+        const pz = row * CELL + CELL / 2;
+        const ped = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE, PED_TOP - 0.02, PED_SIZE), pedMat);
+        ped.position.set(px, (PED_TOP - 0.02) / 2, pz);
+        group.add(ped);
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE + 0.05, 0.025, PED_SIZE + 0.05), capMat);
+        cap.position.set(px, PED_TOP - 0.012, pz);
+        group.add(cap);
+        const facing = Math.atan2(spawn.x - px, spawn.z - pz);
+        pedestals.push({ col, row, pos: new THREE.Vector3(px, 0, pz), facing, top: PED_TOP });
+      }
     }
   }
 

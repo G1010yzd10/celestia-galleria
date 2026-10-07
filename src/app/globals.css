@@ -199,3 +199,37 @@
   background: #c9962e66;
   border-radius: 4px;
 }
+
+/* ── the Sprite Forge & Academy inputs ── */
+.forge-input {
+  width: 100%;
+  background: #0b0e12;
+  border: 1px solid #3a3f45;
+  color: #e7e0d0;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.8rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 3px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.forge-input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+}
+
+.forge-input::placeholder {
+  color: #565b61;
+}
+
+select.forge-input option {
+  background: #0b0e12;
+  color: #e7e0d0;
+}
+
+/* checkerboard behind transparent sprite previews */
+.checker-bg {
+  background: repeating-conic-gradient(#151119 0% 25%, #0d0d12 0% 50%);
+  background-size: 16px 16px;
+}

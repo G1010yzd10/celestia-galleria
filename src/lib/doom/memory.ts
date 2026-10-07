@@ -9,17 +9,23 @@ const BUDGET_MB = 32;
 class MemoryTracker {
   private bytes = 0;
   private readonly textures = new Set<THREE.Texture>();
+  /** per-texture byte cost — lets retire/swap subtract honestly */
+  private readonly cost = new Map<THREE.Texture, number>();
 
   register(tex: THREE.Texture, w: number, h: number, mips = true) {
     if (this.textures.has(tex)) return;
     this.textures.add(tex);
     // RGBA8 + full mip chain ≈ ×4/3
-    this.bytes += w * h * 4 * (mips ? 4 / 3 : 1);
+    const bytes = w * h * 4 * (mips ? 4 / 3 : 1);
+    this.cost.set(tex, bytes);
+    this.bytes += bytes;
   }
 
   unregister(tex: THREE.Texture) {
     if (!this.textures.delete(tex)) return;
-    // caller should supply size; we recompute on next full audit
+    const bytes = this.cost.get(tex) ?? 0;
+    this.cost.delete(tex);
+    this.bytes = Math.max(0, this.bytes - bytes);
   }
 
   /** full audit: walk renderer info (GPU truth) + our tracked set */
@@ -52,6 +58,7 @@ class MemoryTracker {
 
   reset() {
     this.textures.clear();
+    this.cost.clear();
     this.bytes = 0;
   }
 }

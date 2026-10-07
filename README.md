@@ -12,10 +12,11 @@
 ## What it is
 
 Walk through a celestial temple of retail in first person: a gilded coffered
-ceiling with an open oculus, **eight** products on marble pedestals wearing
-golden halos, volumetric god-ray columns falling onto a **turquoise lagoon
-that now mirrors the real temple** (pillars, shafts, halos — ripple-warped),
-a **mother-of-pearl marble floor that truly reflects the world**, and
+ceiling with an open oculus, **ten relics** on marble pedestals wearing
+golden halos — **six more shrines stand empty, waiting for YOUR sprites** —
+volumetric god-ray columns falling onto a **turquoise lagoon that mirrors
+the real temple** (pillars, shafts, halos — ripple-warped), a
+**mother-of-pearl marble floor that truly reflects the world**, and
 **gilded reliquary crates** (the Doom boxes, promoted to heaven) whose
 clearcoat gold drinks the pearl sky through a PMREM environment probe.
 
@@ -38,8 +39,8 @@ gigabytes.
 | Water mesh | 48×24 | **96×48** (silk swell) |
 | Pixel ratio cap | 1.75 | **2.0** |
 | Angel dust / orbs | 160 / 7 | **360 / 10** |
-| Products / god rays | 6 / 4 | **8 / 8** |
-| Tracked VRAM | ~3.97 MB | **~24 MB and proud of it** |
+| Products / god rays | 6 / 4 | **10 + 6 uploadable shrines / 9** |
+| Tracked VRAM | ~3.97 MB | **~28 MB and proud of it** |
 
 The HUD meter displays the honest number with a rose-gold
 **✦ BUDGET BROKEN** badge. Adaptive quality still auto-degrades to LITE
@@ -72,12 +73,28 @@ everywhere.
 - 🔥 PSX Doom fire algorithm on the title screen — recast as ascending
   golden light
 - 🛒 E-commerce — product dialogs with **live 9-angle rotating sprite
-  preview**, specs, quantities, cart drawer, checkout blessing (bloom swell
-  through the whole temple), orders persisted to **`node:sqlite`**
-  (built into Node 24 / Bun — zero dependencies, zero native binaries,
-  **no Prisma**)
-- 🖼️ **Asset pipeline** — drag & drop your own 9-frame PNG sprite sheet
-  onto the page to replace any product live (see below)
+  preview**, world-size readout, specs, quantities, cart drawer, checkout
+  blessing (bloom swell through the whole temple), orders persisted to
+  **`node:sqlite`** (built into Node 24 / Bun — zero dependencies, zero
+  native binaries, **no Prisma**)
+- ⚒ **THE SPRITE FORGE — upload your own 2D sprites** (`⚒` button or title
+  screen): drop **9 PNGs**, **one 9-frame strip**, or **one 3×3 grid** →
+  automatic background removal (border flood-fill, tunable tolerance),
+  scale-locked trim & centering, live drag-to-spin preview → **publish to a
+  persistent shrine** (SQLite + PNG on disk, survives reloads). Residents
+  can be **resized live** or retired to free the altar.
+- 📏 **SAY THE SIZE — the world-size dial**: every relic carries real-world
+  meters (0.08–6 m). Presets from **MUG (0.13 m)** to **SOFA (2.2 m)** and
+  **CAR (4.6 m)**, W/H sliders with aspect lock, a pilgrim-silhouette scale
+  ruler in the Forge, and **live 3D resizing while you walk the temple** —
+  sofa big, mug small, exactly as you say.
+- 🎓 **THE SPRITE ACADEMY — a full tutorial with image references** (`🎓`
+  button): the Doom billboard method explained, the 9-frame contract as a
+  precise SVG diagram + AI-painted reference figures, three authoring paths
+  (photo turntable / Blender render / copy-paste AI prompt), the size guide
+  with a preset table, and the five-step upload ritual.
+- 🖼️ **Asset pipeline (quick swap)** — drag & drop your own 9-frame PNG
+  sprite sheet onto the page to replace any product live for the session
 - 🔊 All audio synthesized with WebAudio — seraph pad (A-major add9),
   bell chimes, arpeggio checkout fanfare — zero asset downloads anywhere
 
@@ -95,11 +112,15 @@ everywhere.
 - Transparent background, subject centered, feet at the bottom edge
 - ≥ 432×48 px recommended (larger sheets are resliced automatically)
 
-**Workflow for your own products:** open the shop → press the 🖼 ASSETS
-button → export a baked reference sheet → redraw/design each frame in any
-2D editor (photo renders, AI renders, hand-drawn art all work) → drag the
-finished PNG back onto the shop window → pick the product slot to replace.
-The engine hot-swaps the atlas — no reload, no rebuild.
+**Workflow for your own products (the full ritual):** title screen →
+**⚒ SPRITE FORGE** → drop your 9 frames (or strip / grid) → tune background
+removal → **CONJURE ATLAS** → drag the spin preview to verify every angle →
+**say the size** (preset or sliders, pilgrim ruler for scale) → **PUBLISH**.
+The relic takes an empty shrine instantly and persists across reloads.
+
+**Quick swap (no persistence):** drag any 9-frame strip onto the shop window
+→ pick the product to replace for this session — the engine hot-swaps the
+atlas with no reload, no rebuild.
 
 ## Tech stack
 
@@ -111,7 +132,7 @@ The engine hot-swaps the atlas — no reload, no rebuild.
 | Environment | PMREMGenerator.fromScene (pearl-sky cubemap) |
 | UI | Tailwind CSS 4 + shadcn/ui |
 | State | Zustand (+ localStorage cart persistence, legacy key migrated) |
-| DB | **`node:sqlite` DatabaseSync** (`orders` table, WAL) — no ORM, no drivers, no Prisma |
+| DB | **`node:sqlite` DatabaseSync** (`orders` + `custom_products`, WAL) — no ORM, no drivers, no Prisma |
 | Audio | WebAudio synthesis (no files) |
 | Textures | 100% procedural canvas generation |
 
@@ -133,10 +154,18 @@ Prisma `Order` table automatically). Override the path with
 src/
   app/page.tsx                 — mounts the shop (client-only)
   app/api/checkout/route.ts    — POST orders → node:sqlite
-  lib/db.ts                    — DatabaseSync wrapper + migration
+  app/api/products/route.ts    — GET list · POST publish forged relics
+  app/api/products/[id]/
+    route.ts                   — PATCH (live size control) · DELETE (retire)
+    sprite/route.ts            — serves uploaded atlas PNGs (immutable cache)
+  lib/db.ts                    — DatabaseSync wrapper + Forge CRUD + migration
   lib/doom/
+    forge.ts                   — client sprite pipeline: slice / flood-fill
+                                 bg removal / trim & center / atlas compose
     engine.ts                  — renderer, MSAA+bloom pipeline, controls,
-                                 adaptive quality governor, collision, loop
+                                 adaptive quality governor, collision, loop,
+                                 Forge API (addCustomProduct / resizeProduct /
+                                 removeProduct + shrine slot tracking)
     level.ts                   — atrium, sky dome, PMREM env probe, oculus,
                                  god rays, mirror floor, reliquary crates
     baker.ts                   — 9-angle sprite baking at 224px (Doom method)

@@ -303,6 +303,81 @@ function buildLaptop(): THREE.Group {
   return g;
 }
 
+// ─── 9. HALO MUG — the tiny relic (size-control showcase) ───
+function buildMug(): THREE.Group {
+  const g = new THREE.Group();
+  const ceramic = std(0xf5efdd, 0.35, 0.1); // pearl glaze
+  const gold = std(AMBER, 0.22, 0.95);
+  // body (r 0.07 × h 0.15)
+  g.add(cyl(0.07, 0.062, 0.15, ceramic, 0, 0.075, 0, 26));
+  // gold rim + foot ring
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.005, 8, 24), gold);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.set(0, 0.148, 0);
+  g.add(rim);
+  const foot = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.004, 8, 24), gold);
+  foot.rotation.x = Math.PI / 2;
+  foot.position.set(0, 0.006, 0);
+  g.add(foot);
+  // coffee — dark pool with a soft sheen
+  g.add(cyl(0.062, 0.062, 0.006, new THREE.MeshStandardMaterial({
+    color: 0x14100c,
+    roughness: 0.18,
+    metalness: 0.35,
+  }), 0, 0.138, 0, 24));
+  // handle — a small golden wishbone
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.008, 8, 22), gold);
+  handle.position.set(0.088, 0.085, 0);
+  handle.rotation.y = Math.PI / 2;
+  g.add(handle);
+  // teal sigil on the front
+  g.add(box(0.03, 0.03, 0.004, new THREE.MeshStandardMaterial({
+    color: TEAL,
+    emissive: TEAL,
+    emissiveIntensity: 0.9,
+    roughness: 0.3,
+  }), 0, 0.085, 0.068));
+  return g;
+}
+
+// ─── 10. NEBULA SOFA — the grand relic (size-control showcase) ───
+function buildSofa(): THREE.Group {
+  const g = new THREE.Group();
+  const velvet = std(0xf2ecdf, 0.92, 0.02); // pearl nebula velvet
+  const velvet2 = std(0xe9e2d2, 0.95, 0.02);
+  const gold = std(AMBER, 0.25, 0.9);
+  // plush base
+  g.add(box(2.1, 0.26, 0.9, velvet, 0, 0.2, 0));
+  // seat cushions
+  g.add(box(0.95, 0.13, 0.78, velvet2, -0.5, 0.36, 0.03));
+  g.add(box(0.95, 0.13, 0.78, velvet2, 0.5, 0.36, 0.03));
+  // backrest + back cushions
+  g.add(box(2.1, 0.52, 0.2, velvet, 0, 0.55, -0.35));
+  g.add(box(0.95, 0.4, 0.14, velvet2, -0.5, 0.6, -0.27));
+  g.add(box(0.95, 0.4, 0.14, velvet2, 0.5, 0.6, -0.27));
+  // rolled arms
+  const armL = cyl(0.13, 0.13, 0.86, velvet, -1.02, 0.36, 0, 18);
+  armL.rotation.x = Math.PI / 2;
+  g.add(armL);
+  const armR = cyl(0.13, 0.13, 0.86, velvet, 1.02, 0.36, 0, 18);
+  armR.rotation.x = Math.PI / 2;
+  g.add(armR);
+  // gilded feet
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.add(cyl(0.035, 0.05, 0.08, gold, sx * 0.95, 0.045, sz * 0.36, 12));
+  }
+  // gold seam piping across the front base
+  g.add(box(2.0, 0.02, 0.02, gold, 0, 0.3, 0.45));
+  // teal sigil pillows
+  for (const sx of [-1, 1]) {
+    const pillow = box(0.34, 0.3, 0.12, std(0x0f766e, 0.8, 0.1), sx * 0.62, 0.62, -0.18);
+    pillow.rotation.x = -0.18;
+    pillow.rotation.z = sx * 0.1;
+    g.add(pillow);
+  }
+  return g;
+}
+
 export const PRODUCT_BUILDERS: Record<string, () => THREE.Group> = {
   voidcam: buildCamera,
   playslab: buildConsole,
@@ -312,6 +387,8 @@ export const PRODUCT_BUILDERS: Record<string, () => THREE.Group> = {
   thump: buildSpeaker,
   cloudstep: buildSneaker,
   seraphbook: buildLaptop,
+  halomug: buildMug,
+  nebulasofa: buildSofa,
 };
 
 // ─── Catalog ───────────────────────────────────────────────────────────────
@@ -419,5 +496,31 @@ export const CATALOG: ProductSpec[] = [
     spriteW: 1.25,
     spriteH: 0.85,
     accent: 0x2dd4bf,
+  },
+  {
+    id: "halomug",
+    name: "HALO MUG",
+    category: "TABLEWARE",
+    price: 39,
+    credits: 39,
+    blurb:
+      "A pearl-glazed chalice for morning pilgrimages. Kiln-fired ceramic with a gilded rim, a wishbone handle, and a teal sigil that glows faintly when the coffee is divine. The smallest relic in the temple — proof that size is a dial, not a destiny.",
+    specs: ["PEARL KILN GLAZE", "22-CARAT GILDED RIM", "WISHBONE GOLD HANDLE", "350ML CAPACITY", "DISHWASHER-SAFE FAITH", "WORLD SIZE: 0.23M"],
+    spriteW: 0.23,
+    spriteH: 0.17,
+    accent: 0x2dd4bf,
+  },
+  {
+    id: "nebulasofa",
+    name: "NEBULA SOFA",
+    category: "FURNITURE",
+    price: 1499,
+    credits: 1499,
+    blurb:
+      "A 2.2-meter cloud of pearl velvet on gilded feet. Deep nebula cushions, rolled arms, and teal sigil pillows stitched for long sermons. The temple's largest relic — walk up close and feel the scale dial roar.",
+    specs: ["2.2M PEARL VELVET BODY", "DEEP NEBULA CUSHIONS", "GILDED BRASS FEET", "ROLLED CLOUD ARMS", "TEAL SIGIL PILLOWS", "WORLD SIZE: 2.20M"],
+    spriteW: 2.2,
+    spriteH: 0.82,
+    accent: 0xf59e0b,
   },
 ];

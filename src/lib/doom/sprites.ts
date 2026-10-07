@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { ProductSpec } from "./types";
 import { ANGLES } from "./baker";
 import { texGlow, texBeam } from "./textures";
-import { trackedCanvasTexture } from "./memory";
+import { trackedCanvasTexture, mem } from "./memory";
 
 // ─── Billboard sprite system — 9-frame Doom rotation + mirrored reflection ──
 // CELESTIAL EDITION: every product now wears a golden halo and stands in a
@@ -131,6 +131,12 @@ export class ProductSprite {
   private hover = false;
   private bob = Math.random() * Math.PI * 2;
   private baseY: number;
+  /** alpha content box of the current atlas, fractions [y0, y1, x0, x1] (y TOP) */
+  private content: [number, number, number, number];
+  private readonly pedestalTop: number;
+  private readonly floorY: number;
+  /** halo crown radius in meters — resizes with the product */
+  private haloR = 0.2;
 
   constructor(
     spec: ProductSpec,
@@ -145,26 +151,17 @@ export class ProductSprite {
     this.spec = spec;
     this.mat = spriteMaterial(texture, false);
     this.rmat = spriteMaterial(texture, true);
+    this.content = content;
+    this.pedestalTop = pedestalTop;
+    this.floorY = floorY;
 
     // plane sized so the *content* (not the frame) matches spec.sprite size,
-    // grounded so content-bottom rests on the pedestal top.
-    const [y0, y1, x0, x1] = content;
-    const ch = Math.max(0.2, y1 - y0);
-    const cw = Math.max(0.2, x1 - x0);
-    const planeH = spec.spriteH / ch;
-    const planeW = spec.spriteW / cw;
-    this.baseY = pedestalTop + 0.01 + (y1 - 0.5) * planeH;
-
+    // grounded so content-bottom rests on the pedestal top — see applySize().
     this.mesh = new THREE.Mesh(PLANE, this.mat);
-    this.mesh.scale.set(planeW, planeH, 1);
-    this.mesh.position.set(0, this.baseY, 0);
     this.mesh.renderOrder = 3;
 
     // mirrored copy across the pedestal-top plane (fake mirror, zero cost)
-    const refH = planeH;
     this.reflection = new THREE.Mesh(PLANE, this.rmat);
-    this.reflection.scale.set(planeW, -refH, 1);
-    this.reflection.position.set(0, 2 * pedestalTop - this.baseY, 0);
     this.reflection.renderOrder = 2;
 
     // glow ring on the pedestal
@@ -180,7 +177,6 @@ export class ProductSprite {
     this.ring = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), ringMat);
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.set(0, pedestalTop + 0.012, 0);
-    this.ring.scale.set(1.15, 1.15, 1);
     this.ring.renderOrder = 4;
 
     // sanctum light column behind the product
@@ -195,11 +191,11 @@ export class ProductSprite {
       fog: true,
     });
     this.beam = new THREE.Mesh(PLANE, beamMat);
-    this.beam.scale.set(spec.spriteW * 1.5, pedestalTop - floorY + spec.spriteH * 1.6, 1);
-    this.beam.position.set(0, (pedestalTop + floorY + spec.spriteH) * 0.5 - 0.2, -0.28);
+    this.beam.position.set(0, 1, -0.28);
     this.beam.renderOrder = 1;
 
-    // golden halo floating above the product — big enough to read at distance
+    // golden halo floating above the product — unit torus, live-scaled so
+    // applySize() can re-crown it without rebuilding geometry
     this.haloMat = new THREE.MeshStandardMaterial({
       color: 0xffe4a8,
       metalness: 1.0,
@@ -207,10 +203,8 @@ export class ProductSprite {
       emissive: 0xc98a20,
       emissiveIntensity: 2.2,
     });
-    const haloR = Math.max(0.18, Math.min(spec.spriteW, spec.spriteH) * 0.34);
-    this.halo = new THREE.Mesh(new THREE.TorusGeometry(haloR, haloR * 0.13, 10, 28), this.haloMat);
+    this.halo = new THREE.Mesh(new THREE.TorusGeometry(1, 0.13, 10, 28), this.haloMat);
     this.halo.rotation.x = Math.PI / 2 + 0.16;
-    this.halo.position.set(0, this.baseY + planeH * 0.5 + 0.42, 0);
 
     // soft golden aura behind the halo — reads at any distance
     this.haloGlow = new THREE.Sprite(
@@ -224,8 +218,6 @@ export class ProductSprite {
         fog: true,
       })
     );
-    this.haloGlow.scale.set(haloR * 5.2, haloR * 5.2, 1);
-    this.haloGlow.position.set(0, this.baseY + planeH * 0.5 + 0.42, 0);
     this.haloGlow.renderOrder = 5;
 
     // floating price tag
@@ -240,12 +232,43 @@ export class ProductSprite {
       })
     );
     this.tag.scale.set(0.92, 0.32, 1);
-    this.tag.position.set(0, this.baseY + planeH * 0.5 + 0.28, 0);
     this.tag.renderOrder = 5;
 
     this.group.position.copy(pos);
     this.group.rotation.y = facing;
     this.group.add(this.mesh, this.reflection, this.ring, this.beam, this.halo, this.haloGlow, this.tag);
+
+    // size + ground everything from the spec's world meters
+    this.applySize(spec.spriteW, spec.spriteH);
+  }
+
+  /**
+   * WORLD SIZE CONTROL — the sofa-is-big / mug-is-small dial.
+   * Re-derives the billboard plane from the atlas content box so the *content*
+   * spans exactly (w × h) meters and its feet rest on the pedestal, then
+   * re-grounds the mirror copy, light beam, halo and price tag. Live-safe:
+   * call it mid-frame and the shrine simply breathes to its new size.
+   */
+  applySize(w: number, h: number) {
+    this.spec.spriteW = w;
+    this.spec.spriteH = h;
+    const [y0, y1, x0, x1] = this.content;
+    const ch = Math.max(0.2, y1 - y0);
+    const cw = Math.max(0.2, x1 - x0);
+    const planeH = h / ch;
+    const planeW = w / cw;
+    this.baseY = this.pedestalTop + 0.01 + (y1 - 0.5) * planeH;
+
+    this.mesh.scale.set(planeW, planeH, 1);
+    this.mesh.position.set(0, this.baseY, 0);
+    this.reflection.scale.set(planeW, -planeH, 1);
+    this.reflection.position.set(0, 2 * this.pedestalTop - this.baseY, 0);
+
+    this.beam.scale.set(w * 1.5, this.pedestalTop - this.floorY + h * 1.6, 1);
+    this.beam.position.set(0, (this.pedestalTop + this.floorY + h) * 0.5 - 0.2, -0.28);
+
+    this.haloR = Math.max(0.18, Math.min(w, h) * 0.34);
+    this.haloGlow.scale.set(this.haloR * 5.2, this.haloR * 5.2, 1);
   }
 
   setHover(h: boolean) {
@@ -264,9 +287,15 @@ export class ProductSprite {
 
   /** swap in a freshly baked/uploaded atlas texture (asset pipeline) */
   swapTexture(texture: THREE.Texture, content?: [number, number, number, number]) {
+    const old = this.mat.uniforms.map.value as THREE.Texture | null;
     this.mat.uniforms.map.value = texture;
     this.rmat.uniforms.map.value = texture;
-    void content;
+    if (content) {
+      this.content = content;
+      // re-ground against the new atlas's content box at the same world size
+      this.applySize(this.spec.spriteW, this.spec.spriteH);
+    }
+    if (old && old !== texture) mem.unregister(old);
   }
 
   update(camPos: THREE.Vector3, t: number, dt: number) {
@@ -303,7 +332,7 @@ export class ProductSprite {
     this.halo.rotation.z = Math.sin(t * 1.3 + this.bob * 0.2) * 0.22;
     this.halo.rotation.y += dt * 0.6;
     const hov = this.hover ? 1.18 : 1.0;
-    const hs = hov + Math.sin(t * 2.2 + this.bob) * 0.04;
+    const hs = this.haloR * (hov + Math.sin(t * 2.2 + this.bob) * 0.04);
     this.halo.scale.set(hs, hs, 1);
 
     const ringMat = this.ring.material as THREE.MeshBasicMaterial;
@@ -327,5 +356,8 @@ export class ProductSprite {
     this.halo.geometry.dispose();
     (this.haloGlow.material as THREE.Material).dispose();
     this.ring.geometry.dispose();
+    // honest VRAM accounting — the atlas leaves the temple with the relic
+    const tex = this.mat.uniforms.map.value as THREE.Texture | null;
+    if (tex) mem.unregister(tex);
   }
 }
