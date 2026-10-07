@@ -1,25 +1,33 @@
 import * as THREE from "three";
 
-// ─── Celestial lagoon — full shader, zero texture bytes ──────────────────────
-// Fresnel sky reflection + animated procedural normals + golden sun speculars
-// + iridescent thin-film sheen + edge foam + divine sparkle. The pool floor
-// gets additive caustics in aqua and gold. Pure math: 0 bytes of VRAM.
+// ─── Celestial lagoon — BUDGET BROKEN EDITION ────────────────────────────────
+// The lagoon now drinks from the SAME real-time planar mirror as the marble
+// floor: the reflected temple (pillars, god rays, halos, ceiling) is sampled
+// through the ripple-warped normal field. Layered under it: pearl-sky fresnel,
+// golden sun speculars, iridescent thin-film sheen, edge foam, divine sparkle.
+// The pool floor still gets additive aqua-and-gold caustics. Pure math + one
+// shared render target: zero texture bytes of its own.
 
 const WATER_VERT = /* glsl */ `
   uniform float uTime;
+  uniform mat4 uTexMat;
   varying vec3 vWorld;
+  varying vec4 vMirror;
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
     // gentle swell (local +z is world +y after the -90deg X rotation)
     float w = sin(wp.x * 1.6 + uTime * 1.1) * 0.5 + sin(wp.z * 2.2 - uTime * 0.8) * 0.5;
     wp.y += w * 0.028;
     vWorld = wp.xyz;
+    vMirror = uTexMat * wp;
     gl_Position = projectionMatrix * viewMatrix * wp;
   }
 `;
 
 const WATER_FRAG = /* glsl */ `
   uniform float uTime;
+  uniform float uMirror;      // 0 = analytic pearl only (LITE tier), 1 = full glory
+  uniform sampler2D tDiffuse; // shared planar-mirror render target
   uniform vec3 uDeep;
   uniform vec3 uShallow;
   uniform vec3 uSky;
@@ -27,6 +35,7 @@ const WATER_FRAG = /* glsl */ `
   uniform vec3 uAqua;
   uniform vec2 uHalf; // pool half extents for edge foam
   varying vec3 vWorld;
+  varying vec4 vMirror;
 
   float h(vec2 p) {
     float t = uTime;
@@ -55,9 +64,15 @@ const WATER_FRAG = /* glsl */ `
     // ---- fresnel ----
     float fr = pow(1.0 - clamp(dot(V, n), 0.0, 1.0), 2.6);
 
-    // ---- pearl-sky environment reflection ----
+    // ---- pearl-sky environment reflection (base layer) ----
     float up = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 env = mix(uDeep, uSky, up * up);
+
+    // ---- TRUE planar reflection, warped by the living ripples ----
+    // projective mirror coords, offset in the normal's XZ before the w-divide
+    vec4 m = vMirror;
+    m.xy += vec2(n.x, n.z) * m.w * 0.062;
+    vec3 temple = texture2DProj(tDiffuse, m).rgb;
 
     // ---- golden sun + aqua strip speculars (analytic glints) ----
     vec3 L1 = normalize(vec3(0.12, 0.92, -0.18)); // sun through the oculus
@@ -65,8 +80,9 @@ const WATER_FRAG = /* glsl */ `
     float sp1 = pow(max(dot(R, L1), 0.0), 90.0) * 4.2;
     float sp2 = pow(max(dot(R, L2), 0.0), 190.0) * 1.8;
 
-    // ---- body color ----
-    vec3 col = mix(uShallow, env, 0.35 + 0.65 * fr);
+    // ---- body: pearl base, then the reflected temple laid over it ----
+    vec3 col = mix(uShallow, env, 0.30 + 0.70 * fr);
+    col = mix(col, temple * vec3(1.05, 1.01, 0.99), (0.40 + 0.52 * fr) * uMirror);
     col += uSun * sp1 + uAqua * sp2;
 
     // ---- iridescent thin-film sheen at grazing angles ----
@@ -126,6 +142,8 @@ export interface WaterRig {
   water: THREE.Mesh;
   caustics: THREE.Mesh;
   update(t: number): void;
+  /** blend weight for the planar mirror (LITE tier runs analytic-only) */
+  setMirror(on: boolean): void;
 }
 
 export function buildWater(
@@ -134,13 +152,20 @@ export function buildWater(
   w: number,
   d: number,
   waterY: number,
-  poolFloorY: number
+  poolFloorY: number,
+  /** shared mirror render target (owned by the level) */
+  mirrorTex: THREE.Texture,
+  /** shared mirror projection matrix — updated in place every frame */
+  texMat: THREE.Matrix4
 ): WaterRig {
   const waterMat = new THREE.ShaderMaterial({
     vertexShader: WATER_VERT,
     fragmentShader: WATER_FRAG,
     uniforms: {
       uTime: { value: 0 },
+      uMirror: { value: 1 },
+      tDiffuse: { value: mirrorTex },
+      uTexMat: { value: texMat },
       uDeep: { value: new THREE.Color(0x0a3244) },
       uShallow: { value: new THREE.Color(0x27b8ac) },
       uSky: { value: new THREE.Color(0xaadbe6) },
@@ -151,7 +176,8 @@ export function buildWater(
     transparent: true,
   });
 
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(w, d, 48, 24), waterMat);
+  // budget-broken tessellation: 96×48 segments so the swell rolls like silk
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(w, d, 96, 48), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.set(cx, waterY, cz);
 
@@ -177,6 +203,9 @@ export function buildWater(
     update(t: number) {
       waterMat.uniforms.uTime.value = t;
       causticMat.uniforms.uTime.value = t;
+    },
+    setMirror(on: boolean) {
+      waterMat.uniforms.uMirror.value = on ? 1 : 0;
     },
   };
 }

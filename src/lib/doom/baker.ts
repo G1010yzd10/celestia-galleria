@@ -6,9 +6,13 @@ import { mem } from "./memory";
 // A throwaway scene renders each product from 9 bearings (40° steps = 360°),
 // reads the pixels back and composes ONE atlas canvas per product.
 // The 3D geometry is disposed afterwards — the shop only ships sprites.
+//
+// CELESTIA GALLERIA — BUDGET BROKEN EDITION: frames went 96 → 224 px
+// (2.3× the pixel detail, ~2.4 MB per atlas). The Doom method stays —
+// we simply spend the bytes on glory instead of hoarding them.
 
 export const ANGLES = 9;
-export const FRAME = 96; // px per frame → atlas 864×96 ≈ 0.33 MB RGBA+MIPS
+export const FRAME = 224; // px per frame → atlas 2016×224 ≈ 2.4 MB RGBA+MIPS
 
 export interface BakedProduct {
   atlas: HTMLCanvasElement;
@@ -59,7 +63,6 @@ export function bakeProduct(
   const rt = new THREE.WebGLRenderTarget(FRAME, FRAME, {
     samples: 4,
     format: THREE.RGBAFormat,
-    transparent: true,
   });
 
   const atlas = document.createElement("canvas");

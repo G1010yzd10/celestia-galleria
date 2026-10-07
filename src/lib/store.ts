@@ -34,8 +34,48 @@ interface ShopState {
 
 const MAX_QTY = 9;
 
+// cart persistence — migrated from the DOOM MART era key on first load
+const CART_KEY = "celestia-cart";
+const LEGACY_KEY = "doommart-cart";
+
+function persist(cart: CartItem[]) {
+  try {
+    localStorage.setItem(CART_KEY, JSON.stringify(cart));
+  } catch {
+    /* sandboxed iframe — cart stays in memory */
+  }
+}
+
+(function migrateLegacyCart() {
+  try {
+    const fresh = localStorage.getItem(CART_KEY);
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (!fresh && legacy) localStorage.setItem(CART_KEY, legacy);
+  } catch {
+    /* storage unavailable */
+  }
+})();
+
+/** rehydrate the blessed locker on page load (ssr:false — browser only) */
+function loadCart(): CartItem[] {
+  try {
+    const raw = localStorage.getItem(CART_KEY) ?? localStorage.getItem(LEGACY_KEY);
+    if (raw) {
+      const items = JSON.parse(raw) as CartItem[];
+      if (Array.isArray(items)) {
+        return items.filter(
+          (it) => it && typeof it.id === "string" && typeof it.qty === "number"
+        );
+      }
+    }
+  } catch {
+    /* corrupted or blocked storage — start with an empty locker */
+  }
+  return [];
+}
+
 export const useShop = create<ShopState>((set, get) => ({
-  cart: [],
+  cart: loadCart(),
   addToCart: (spec) => {
     const cart = [...get().cart];
     const i = cart.findIndex((c) => c.id === spec.id);
@@ -45,19 +85,12 @@ export const useShop = create<ShopState>((set, get) => ({
       cart.push({ id: spec.id, name: spec.name, price: spec.price, qty: 1 });
     }
     set({ cart });
-    try {
-      localStorage.setItem("doommart-cart", JSON.stringify(cart));
-    } catch {
-      /* sandboxed iframe — cart stays in memory */
-    }
+    persist(cart);
   },
   removeFromCart: (id) => {
-    set({ cart: get().cart.filter((c) => c.id !== id) });
-    try {
-      localStorage.setItem("doommart-cart", JSON.stringify(get().cart));
-    } catch {
-      /* noop */
-    }
+    const cart = get().cart.filter((c) => c.id !== id);
+    set({ cart });
+    persist(cart);
   },
   setQty: (id, qty) => {
     let cart = get().cart.map((c) =>
@@ -65,16 +98,12 @@ export const useShop = create<ShopState>((set, get) => ({
     );
     cart = cart.filter((c) => c.qty > 0);
     set({ cart });
-    try {
-      localStorage.setItem("doommart-cart", JSON.stringify(cart));
-    } catch {
-      /* noop */
-    }
+    persist(cart);
   },
   clearCart: () => {
     set({ cart: [] });
     try {
-      localStorage.removeItem("doommart-cart");
+      localStorage.removeItem(CART_KEY);
     } catch {
       /* noop */
     }

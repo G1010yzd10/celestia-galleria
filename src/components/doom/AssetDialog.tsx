@@ -40,7 +40,7 @@ export function AssetDialog({
     if (!url) return;
     const a = document.createElement("a");
     a.href = url;
-    a.download = `doommart-${id}-9angle-reference.png`;
+    a.download = `celestia-${id}-9angle-reference.png`;
     a.click();
     onToast(`REFERENCE SHEET FOR ${id.toUpperCase()} EXPORTED`);
   };

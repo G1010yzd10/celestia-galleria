@@ -1,11 +1,15 @@
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
-// ─── SQLite via node:sqlite — zero-dependency, Doom-grade lean ───────────────
+// ─── SQLite via node:sqlite — zero-dependency, Doom-grade lean ───────────
 // No ORM, no query compiler, no native add-on: the driver ships inside the
 // runtime itself (Node 24 / Bun 1.3+). One file, one table, honest SQL.
+// CELESTIA GALLERIA keeps the Prisma exorcism permanent.
 
-const DB_PATH = process.env.DOOM_DB_PATH ?? "db/custom.db";
+const DB_PATH =
+  process.env.CELESTIA_DB_PATH ?? process.env.DOOM_DB_PATH ?? "db/custom.db";
 
 export interface OrderRow {
   id: string;
@@ -43,6 +47,16 @@ function migrate(db: DatabaseSync) {
 const globalForSqlite = globalThis as unknown as { __doomSqlite?: DatabaseSync };
 
 function openDb(): DatabaseSync {
+  // SQLite happily creates a missing FILE, but not a missing FOLDER —
+  // make sure the parent directory exists before the first open.
+  const target = DB_PATH === ":memory:" ? DB_PATH : resolve(process.cwd(), DB_PATH);
+  if (target !== ":memory:") {
+    try {
+      mkdirSync(dirname(target), { recursive: true });
+    } catch {
+      /* read-only fs — let the open() below surface the real error */
+    }
+  }
   const d = new DatabaseSync(DB_PATH);
   try {
     d.exec("PRAGMA journal_mode = WAL;");

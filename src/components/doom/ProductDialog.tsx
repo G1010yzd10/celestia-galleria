@@ -9,8 +9,11 @@ import { useShop } from "@/lib/store";
 
 export function ProductDialog({
   onPick,
+  spriteSheetUrl,
 }: {
   onPick?: (id: string) => void;
+  /** live 9-frame atlas PNG — shown rotating, Doom showcase style */
+  spriteSheetUrl?: string | null;
 }) {
   const selected = useShop((s) => s.selected);
   const setSelected = useShop((s) => s.setSelected);
@@ -47,6 +50,28 @@ export function ProductDialog({
             )}
           </div>
         </DialogHeader>
+
+        {/* live 9-angle rotation — the Doom sprite, spinning in its shrine */}
+        {spriteSheetUrl && (
+          <div className="relative h-32 md:h-40 overflow-hidden border border-neutral-700 bg-[repeating-conic-gradient(#18181b_0%_25%,#101012_0%_50%)] bg-[length:18px_18px]">
+            <div
+              className="absolute inset-0 flex items-center justify-center"
+              style={{ boxShadow: `inset 0 0 60px ${accent}22` }}
+            >
+              {/* one 9-frame strip stepped left 1/9 at a time = rotation */}
+              <img
+                key={selected.id}
+                src={spriteSheetUrl}
+                alt={`${selected.name} 9-angle sprite rotation`}
+                className="sprite-rotate h-[85%] w-[900%] max-w-none object-contain object-left"
+                style={{ filter: `drop-shadow(0 10px 14px rgba(0,0,0,0.55))` }}
+              />
+            </div>
+            <div className="absolute bottom-1 right-2 text-[9px] font-mono text-neutral-500 tracking-widest">
+              LIVE 9-ANGLE ROTATION
+            </div>
+          </div>
+        )}
 
         <div
           className="border border-neutral-700 bg-black/60 p-3 text-xs md:text-sm leading-relaxed text-neutral-300"

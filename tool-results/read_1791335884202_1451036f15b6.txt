@@ -1,0 +1,910 @@
+     1→     1→import * as THREE from "three";
+     2→     2→import { parseMap, CELL, type LevelGrid } from "./types";
+     3→     3→import { texWall, texCeil, texPedestal, texSign, texGlow, texBeam } from "./textures";
+     4→     4→import { trackedCanvasTexture, mem } from "./memory";
+     5→     5→import { buildWater, type WaterRig } from "./water";
+     6→     6→
+     7→     7→// ─── CELESTIA GALLERIA — the atrium between worlds ──────────────────────────
+     8→     8→// Ivory marble, gilded coffered ceiling with an open oculus, god-ray light
+     9→     9→// shafts falling onto a celestial lagoon, and a real planar-mirror marble
+    10→    10→// floor — all still inside the 4 MB Doom club.
+    11→    11→
+    12→    12→export const WALL_H = 4.2;
+    13→    13→export const PED_SIZE = 0.9;
+    14→    14→export const PED_TOP = 0.96;
+    15→    15→export const FLOOR_Y = 0;
+    16→    16→export const WATER_Y = -0.32;
+    17→    17→export const POOL_FLOOR_Y = -1.1;
+    18→    18→
+    19→    19→export interface PedestalInfo {
+    20→    20→  col: number;
+    21→    21→  row: number;
+    22→    22→  pos: THREE.Vector3;
+    23→    23→  facing: number;
+    24→    24→  top: number;
+    25→    25→}
+    26→    26→
+    27→    27→export interface LevelRig {
+    28→    28→  group: THREE.Group;
+    29→    29→  grid: LevelGrid;
+    30→    30→  pedestals: PedestalInfo[];
+    31→    31→  pool: { cx: number; cz: number; w: number; d: number };
+    32→    32→  spawn: { x: number; z: number; yaw: number };
+    33→    33→  update(t: number, dt: number): void;
+    34→    34→  /** render the scene into the floor's mirror target (call before main pass) */
+    35→    35→  renderReflection(
+    36→    36→    renderer: THREE.WebGLRenderer,
+    37→    37→    scene: THREE.Scene,
+    38→    38→    camera: THREE.PerspectiveCamera,
+    39→    39→    hidden: THREE.Object3D[]
+    40→    40→  ): void;
+    41→    41→  /** toggle the mirror blend (lite quality tier runs marble-only) */
+    42→    42→  setMirror(on: boolean): void;
+    43→    43→}
+    44→    44→
+    45→    45→// ── sky dome: animated pearl heavens, zero texture bytes ──
+    46→    46→const SKY_VERT = /* glsl */ `
+    47→    47→  varying vec3 vDir;
+    48→    48→  void main() {
+    49→    49→    vDir = normalize(position);
+    50→    50→    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
+    51→    51→  }
+    52→    52→`;
+    53→    53→
+    54→    54→const SKY_FRAG = /* glsl */ `
+    55→    55→  uniform vec3 uZenith;
+    56→    56→  uniform vec3 uHorizon;
+    57→    57→  uniform vec3 uSunDir;
+    58→    58→  uniform vec3 uSunCol;
+    59→    59→  uniform float uTime;
+    60→    60→  varying vec3 vDir;
+    61→    61→
+    62→    62→  float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    63→    63→  float vnoise(vec2 p) {
+    64→    64→    vec2 i = floor(p), f = fract(p);
+    65→    65→    vec2 u = f * f * (3.0 - 2.0 * f);
+    66→    66→    return mix(
+    67→    67→      mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+    68→    68→      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+    69→    69→      u.y
+    70→    70→    );
+    71→    71→  }
+    72→    72→  float fbm(vec2 p) {
+    73→    73→    float v = 0.0, a = 0.5;
+    74→    74→    for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+    75→    75→    return v;
+    76→    76→  }
+    77→    77→
+    78→    78→  void main() {
+    79→    79→    vec3 d = normalize(vDir);
+    80→    80→    float h = clamp(d.y, -0.15, 1.0);
+    81→    81→    vec3 col = mix(uHorizon, uZenith, pow(max(h, 0.0), 0.6));
+    82→    82→
+    83→    83→    // sun + divine glare (restrained so bloom doesn't white-out)
+    84→    84→    float s = max(dot(d, normalize(uSunDir)), 0.0);
+    85→    85→    col += uSunCol * (pow(s, 400.0) * 1.6 + pow(s, 32.0) * 0.35 + pow(s, 7.0) * 0.10);
+    86→    86→
+    87→    87→    // slow drifting pearl clouds
+    88→    88→    vec2 cuv = vec2(atan(d.z, d.x) * 0.85, d.y * 2.6);
+    89→    89→    float cl = fbm(cuv * 1.6 + vec2(uTime * 0.008, uTime * 0.0022));
+    90→    90→    cl = smoothstep(0.48, 0.82, cl) * smoothstep(0.02, 0.30, d.y);
+    91→    91→    col = mix(col, vec3(1.0, 0.985, 0.95), cl * 0.6);
+    92→    92→
+    93→    93→    // faint golden shimmer band near horizon
+    94→    94→    col += vec3(0.30, 0.22, 0.08) * pow(1.0 - abs(d.y), 9.0) * 0.5;
+    95→    95→
+    96→    96→    gl_FragColor = vec4(col, 1.0);
+    97→    97→    #include <colorspace_fragment>
+    98→    98→  }
+    99→    99→`;
+   100→   100→
+   101→   101→// ── god-ray shafts: fake volumetric light cylinders ──
+   102→   102→const SHAFT_VERT = /* glsl */ `
+   103→   103→  varying vec3 vNormalW;
+   104→   104→  varying vec3 vWorld;
+   105→   105→  varying vec2 vUv;
+   106→   106→  void main() {
+   107→   107→    vUv = uv;
+   108→   108→    vNormalW = normalize(mat3(modelMatrix) * normal);
+   109→   109→    vec4 wp = modelMatrix * vec4(position, 1.0);
+   110→   110→    vWorld = wp.xyz;
+   111→   111→    gl_Position = projectionMatrix * viewMatrix * wp;
+   112→   112→  }
+   113→   113→`;
+   114→   114→
+   115→   115→const SHAFT_FRAG = /* glsl */ `
+   116→   116→  uniform float uTime;
+   117→   117→  uniform vec3 uColor;
+   118→   118→  uniform float uIntensity;
+   119→   119→  varying vec3 vNormalW;
+   120→   120→  varying vec3 vWorld;
+   121→   121→  varying vec2 vUv;
+   122→   122→
+   123→   123→  float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+   124→   124→  float vnoise(vec2 p) {
+   125→   125→    vec2 i = floor(p), f = fract(p);
+   126→   126→    vec2 u = f * f * (3.0 - 2.0 * f);
+   127→   127→    return mix(
+   128→   128→      mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+   129→   129→      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+   130→   130→      u.y
+   131→   131→    );
+   132→   132→  }
+   133→   133→
+   134→   134→  void main() {
+   135→   135→    vec3 V = normalize(cameraPosition - vWorld);
+   136→   136→    vec3 N = normalize(vNormalW);
+   137→   137→    float facing = abs(dot(N, V));          // fade at silhouette edges
+   138→   138→    float body = pow(facing, 1.7);
+   139→   139→    float vert = mix(0.30, 1.05, vUv.y);    // brighter toward heaven (top)
+   140→   140→    float shimmer = 0.55 + 0.45 * vnoise(vec2(vUv.x * 9.0, vUv.y * 4.0 - uTime * 0.22));
+   141→   141→    float a = body * vert * shimmer * uIntensity;
+   142→   142→    gl_FragColor = vec4(uColor, a);
+   143→   143→  }
+   144→   144→`;
+   145→   145→
+   146→   146→// ── mirror marble floor: PROCEDURAL pearl marble + true planar reflection ──
+   147→   147→const FLOOR_VERT = /* glsl */ `
+   148→   148→  uniform mat4 uTexMat;
+   149→   149→  varying vec3 vWorld;
+   150→   150→  varying vec4 vMirror;
+   151→   151→  #include <fog_pars_vertex>
+   152→   152→  void main() {
+   153→   153→    vec4 wp = modelMatrix * vec4(position, 1.0);
+   154→   154→    vWorld = wp.xyz;
+   155→   155→    vMirror = uTexMat * wp;
+   156→   156→    vec4 mvPosition = viewMatrix * wp;
+   157→   157→    gl_Position = projectionMatrix * mvPosition;
+   158→   158→    #include <fog_vertex>
+   159→   159→  }
+   160→   160→`;
+   161→   161→
+   162→   162→const FLOOR_FRAG = /* glsl */ `
+   163→   163→  uniform sampler2D tDiffuse;
+   164→   164→  uniform float uTime;
+   165→   165→  uniform float uMirror;
+   166→   166→  uniform vec3 uPoolCenter;
+   167→   167→  uniform vec2 uPoolHalf;
+   168→   168→  varying vec3 vWorld;
+   169→   169→  varying vec4 vMirror;
+   170→   170→  #include <fog_pars_fragment>
+   171→   171→
+   172→   172→  float fhash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+   173→   173→  float fnoise(vec2 p) {
+   174→   174→    vec2 i = floor(p), f = fract(p);
+   175→   175→    vec2 u = f * f * (3.0 - 2.0 * f);
+   176→   176→    return mix(
+   177→   177→      mix(fhash(i), fhash(i + vec2(1.0, 0.0)), u.x),
+   178→   178→      mix(fhash(i + vec2(0.0, 1.0)), fhash(i + vec2(1.0, 1.0)), u.x),
+   179→   179→      u.y
+   180→   180→    );
+   181→   181→  }
+   182→   182→  float ffbm(vec2 p) {
+   183→   183→    float v = 0.0, a = 0.5;
+   184→   184→    for (int i = 0; i < 4; i++) { v += a * fnoise(p); p = p * 2.03 + 17.1; a *= 0.5; }
+   185→   185→    return v;
+   186→   186→  }
+   187→   187→
+   188→   188→  void main() {
+   189→   189→    vec2 mw = vWorld.xz;
+   190→   190→    // ---- procedural pearl marble (infinite detail, zero VRAM) ----
+   191→   191→    vec3 base = vec3(0.83, 0.85, 0.835);
+   192→   192→    float n1 = ffbm(mw * 0.9);
+   193→   193→    float n2 = ffbm(mw * 0.9 + 4.7);
+   194→   194→    base += vec3(0.0, 0.035, 0.03) * smoothstep(0.4, 0.75, n1);        // opal aqua wash
+   195→   195→    base += vec3(0.045, 0.02, 0.05) * smoothstep(0.45, 0.8, n2);       // opal rose wash
+   196→   196→    base += vec3(0.07, 0.05, 0.0) * smoothstep(0.5, 0.82, ffbm(mw * 0.35 + 9.2)); // gold mist
+   197→   197→    // flowing gold veins: warped ridge lines of fbm (wide enough to read)
+   198→   198→    float vein1 = abs(sin((ffbm(mw * 1.35 + 2.2) * 7.0 + mw.x * 0.4) * 3.14159));
+   199→   199→    float vein2 = abs(sin((ffbm(mw * 1.05 + 7.7) * 8.0 - mw.y * 0.35) * 3.14159));
+   200→   200→    float goldV = pow(1.0 - vein1, 8.0) * 0.9 + pow(1.0 - vein2, 14.0) * 0.7;
+   201→   201→    base += vec3(0.85, 0.58, 0.16) * goldV;
+   202→   202→    // dark marbling for contrast against the gold
+   203→   203→    base = mix(base, vec3(0.52, 0.50, 0.44), pow(1.0 - vein2, 22.0) * 0.5);
+   204→   204→    // subtle slab seams every 2.4 m
+   205→   205→    vec2 seam = abs(fract(mw / 2.4) - 0.5);
+   206→   206→    base = mix(base, vec3(0.62, 0.60, 0.54), smoothstep(0.475, 0.5, max(seam.x, seam.y)) * 0.4);
+   207→   207→
+   208→   208→    // golden sun cast from the oculus: wide warm pool + tight hot core
+   209→   209→    vec2 dp = abs(vWorld.xz - uPoolCenter.xz) - uPoolHalf;
+   210→   210→    float dpool = length(max(dp, vec2(0.0)));
+   211→   211→    base += vec3(0.26, 0.18, 0.06) * exp(-dpool * 0.95) * (0.8 + 0.2 * sin(uTime * 0.9));
+   212→   212→    base += vec3(0.32, 0.24, 0.09) * exp(-dpool * 2.4);
+   213→   213→    base += vec3(0.05, 0.20, 0.18) * exp(-dpool * 1.5) * (0.75 + 0.25 * sin(uTime * 1.7));
+   214→   214→
+   215→   215→    // true mirror reflection, fresnel-weighted (grazing angles go glassy)
+   216→   216→    vec3 refl = texture2DProj(tDiffuse, vMirror).rgb;
+   217→   217→    vec3 V = normalize(cameraPosition - vWorld);
+   218→   218→    float fr = pow(1.0 - clamp(V.y, 0.0, 1.0), 3.0);
+   219→   219→    vec3 col = mix(base, refl, (0.26 + 0.74 * fr) * uMirror);
+   220→   220→
+   221→   221→    // halo-light strip streaks
+   222→   222→    float streakN = exp(-abs(vWorld.z - 0.12) * 1.35);
+   223→   223→    float streakE = exp(-abs(vWorld.x - 19.08) * 1.35);
+   224→   224→    col += vec3(0.06, 0.30, 0.27) * streakN * fr;
+   225→   225→    col += vec3(0.30, 0.20, 0.05) * streakE * fr;
+   226→   226→
+   227→   227→    gl_FragColor = vec4(col, 1.0);
+   228→   228→    #include <colorspace_fragment>
+   229→   229→    #include <fog_fragment>
+   230→   230→  }
+   231→   231→`;
+   232→   232→
+   233→   233→function scaleUV(geo: THREE.BufferGeometry, sx: number, sy: number) {
+   234→   234→  const uv = geo.attributes.uv as THREE.BufferAttribute;
+   235→   235→  for (let i = 0; i < uv.count; i++) {
+   236→   236→    uv.setXY(i, uv.getX(i) * sx, uv.getY(i) * sy);
+   237→   237→  }
+   238→   238→  uv.needsUpdate = true;
+   239→   239→}
+   240→   240→
+   241→   241→function wallPlane(
+   242→   242→  w: number,
+   243→   243→  tilesX: number,
+   244→   244→  mat: THREE.Material,
+   245→   245→  pos: [number, number, number],
+   246→   246→  rotY: number
+   247→   247→) {
+   248→   248→  const g = new THREE.PlaneGeometry(w, WALL_H);
+   249→   249→  scaleUV(g, tilesX, WALL_H / CELL);
+   250→   250→  const m = new THREE.Mesh(g, mat);
+   251→   251→  m.position.set(...pos);
+   252→   252→  m.rotation.y = rotY;
+   253→   253→  return m;
+   254→   254→}
+   255→   255→
+   256→   256→function neonStrip(
+   257→   257→  len: number,
+   258→   258→  color: THREE.Color,
+   259→   259→  pos: [number, number, number],
+   260→   260→  rotY: number,
+   261→   261→  haloTex: THREE.Texture
+   262→   262→) {
+   263→   263→  const g = new THREE.Group();
+   264→   264→  const strip = new THREE.Mesh(
+   265→   265→    new THREE.BoxGeometry(len, 0.07, 0.05),
+   266→   266→    new THREE.MeshBasicMaterial({ color })
+   267→   267→  );
+   268→   268→  strip.position.set(0, 0, 0.03);
+   269→   269→  g.add(strip);
+   270→   270→  const halo = new THREE.Mesh(
+   271→   271→    new THREE.PlaneGeometry(len, 0.46),
+   272→   272→    new THREE.MeshBasicMaterial({
+   273→   273→      map: haloTex,
+   274→   274→      color,
+   275→   275→      transparent: true,
+   276→   276→      blending: THREE.AdditiveBlending,
+   277→   277→      depthWrite: false,
+   278→   278→      opacity: 0.55,
+   279→   279→      side: THREE.DoubleSide,
+   280→   280→      fog: true,
+   281→   281→    })
+   282→   282→  );
+   283→   283→  halo.rotation.z = Math.PI / 2;
+   284→   284→  halo.position.set(0, 0, 0.015);
+   285→   285→  g.add(halo);
+   286→   286→  g.position.set(...pos);
+   287→   287→  g.rotation.y = rotY;
+   288→   288→  return g;
+   289→   289→}
+   290→   290→
+   291→   291→function sign(
+   292→   292→  text: string,
+   293→   293→  w: number,
+   294→   294→  pos: [number, number, number],
+   295→   295→  rotY: number,
+   296→   296→  accent?: string
+   297→   297→) {
+   298→   298→  const canvas = texSign(text, accent);
+   299→   299→  const tex = trackedCanvasTexture(canvas, true);
+   300→   300→  tex.wrapS = THREE.ClampToEdgeWrapping;
+   301→   301→  tex.wrapT = THREE.ClampToEdgeWrapping;
+   302→   302→  const h = (w * canvas.height) / canvas.width;
+   303→   303→  const m = new THREE.Mesh(
+   304→   304→    new THREE.PlaneGeometry(w, h),
+   305→   305→    new THREE.MeshBasicMaterial({
+   306→   306→      map: tex,
+   307→   307→      transparent: true,
+   308→   308→      fog: true,
+   309→   309→      color: new THREE.Color(1.25, 1.25, 1.25),
+   310→   310→    })
+   311→   311→  );
+   312→   312→  m.position.set(...pos);
+   313→   313→  m.rotation.y = rotY;
+   314→   314→  return m;
+   315→   315→}
+   316→   316→
+   317→   317→const GOLD = 0xc9962e;
+   318→   318→const GOLD_BRIGHT = new THREE.Color(0xffd98c).multiplyScalar(2.0);
+   319→   319→const AQUA_BRIGHT = new THREE.Color(0x3fd8c8).multiplyScalar(2.0);
+   320→   320→
+   321→   321→export function buildLevel(): LevelRig {
+   322→   322→  const group = new THREE.Group();
+   323→   323→  const grid = parseMap();
+   324→   324→  const W = grid.w * CELL; // 19.2
+   325→   325→  const D = grid.h * CELL; // 16.8
+   326→   326→  const cx = W / 2;
+   327→   327→  const cz = D / 2;
+   328→   328→
+   329→   329→  // ── textures (shared) ──
+   330→   330→  const wallTex = trackedCanvasTexture(texWall());
+   331→   331→  const ceilTex = trackedCanvasTexture(texCeil());
+   332→   332→  const pedTex = trackedCanvasTexture(texPedestal());
+   333→   333→  const beamTex = trackedCanvasTexture(texBeam(), false);
+   334→   334→  beamTex.wrapS = THREE.ClampToEdgeWrapping;
+   335→   335→  const glowTex = trackedCanvasTexture(texGlow(), false);
+   336→   336→  glowTex.wrapS = THREE.ClampToEdgeWrapping;
+   337→   337→  glowTex.wrapT = THREE.ClampToEdgeWrapping;
+   338→   338→
+   339→   339→  const wallMat = new THREE.MeshStandardMaterial({
+   340→   340→    map: wallTex,
+   341→   341→    roughness: 0.38,
+   342→   342→    metalness: 0.12,
+   343→   343→  });
+   344→   344→  const goldMat = new THREE.MeshStandardMaterial({
+   345→   345→    color: GOLD,
+   346→   346→    roughness: 0.22,
+   347→   347→    metalness: 1.0,
+   348→   348→    emissive: 0x2a1c05,
+   349→   349→    emissiveIntensity: 0.6,
+   350→   350→  });
+   351→   351→
+   352→   352→  // ── sky dome (seen through the oculus) ──
+   353→   353→  const skyMat = new THREE.ShaderMaterial({
+   354→   354→    vertexShader: SKY_VERT,
+   355→   355→    fragmentShader: SKY_FRAG,
+   356→   356→    uniforms: {
+   357→   357→      uZenith: { value: new THREE.Color(0x86c8ea) },
+   358→   358→      uHorizon: { value: new THREE.Color(0xfff3da) },
+   359→   359→      uSunDir: { value: new THREE.Vector3(0.1, 1.0, 0.05).normalize() },
+   360→   360→      uSunCol: { value: new THREE.Color(1.0, 0.93, 0.78) },
+   361→   361→      uTime: { value: 0 },
+   362→   362→    },
+   363→   363→    side: THREE.BackSide,
+   364→   364→    depthWrite: false,
+   365→   365→  });
+   366→   366→  const sky = new THREE.Mesh(new THREE.SphereGeometry(30, 32, 18), skyMat);
+   367→   367→  sky.position.set(cx, 1.5, cz);
+   368→   368→  sky.renderOrder = -10;
+   369→   369→  group.add(sky);
+   370→   370→
+   371→   371→  // ── perimeter walls ──
+   372→   372→  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, 0], 0));
+   373→   373→  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, D], Math.PI));
+   374→   374→  group.add(wallPlane(D, D / CELL, wallMat, [W, WALL_H / 2, cz], -Math.PI / 2));
+   375→   375→  group.add(wallPlane(D, D / CELL, wallMat, [0, WALL_H / 2, cz], Math.PI / 2));
+   376→   376→
+   377→   377→  // ── gilded cornice + base rails ──
+   378→   378→  const trim = (len: number, pos: [number, number, number], rotY: number) => {
+   379→   379→    const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.07, 0.07), goldMat);
+   380→   380→    m.position.set(...pos);
+   381→   381→    m.rotation.y = rotY;
+   382→   382→    group.add(m);
+   383→   383→  };
+   384→   384→  trim(W - 0.3, [cx, WALL_H - 0.14, 0.08], 0);
+   385→   385→  trim(W - 0.3, [cx, WALL_H - 0.14, D - 0.08], 0);
+   386→   386→  trim(D - 0.3, [W - 0.08, WALL_H - 0.14, cz], Math.PI / 2);
+   387→   387→  trim(D - 0.3, [0.08, WALL_H - 0.14, cz], Math.PI / 2);
+   388→   388→  trim(W - 0.3, [cx, 0.16, 0.08], 0);
+   389→   389→  trim(W - 0.3, [cx, 0.16, D - 0.08], 0);
+   390→   390→  trim(D - 0.3, [W - 0.08, 0.16, cz], Math.PI / 2);
+   391→   391→  trim(D - 0.3, [0.08, 0.16, cz], Math.PI / 2);
+   392→   392→
+   393→   393→  // ── pool rectangle (from map art rows 4..7, cols 4..11) ──
+   394→   394→  const poolX0 = 4 * CELL,
+   395→   395→    poolX1 = 12 * CELL,
+   396→   396→    poolZ0 = 4 * CELL,
+   397→   397→    poolZ1 = 8 * CELL;
+   398→   398→  const pool = {
+   399→   399→    cx: (poolX0 + poolX1) / 2,
+   400→   400→    cz: (poolZ0 + poolZ1) / 2,
+   401→   401→    w: poolX1 - poolX0,
+   402→   402→    d: poolZ1 - poolZ0,
+   403→   403→  };
+   404→   404→
+   405→   405→  // ── mirror marble floor (4 segments around the pool hole) ──
+   406→   406→  // reflection render target — 448×224 RGBA, honestly tracked in the budget
+   407→   407→  // (the freed floor-texture bytes pay for the sharper mirror)
+   408→   408→  const MIRROR_W = 448;
+   409→   409→  const MIRROR_H = 224;
+   410→   410→  const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H);
+   411→   411→  mirrorRT.texture.minFilter = THREE.LinearFilter;
+   412→   412→  mirrorRT.texture.magFilter = THREE.LinearFilter;
+   413→   413→  mirrorRT.texture.generateMipmaps = false;
+   414→   414→  mem.register(mirrorRT.texture, MIRROR_W, MIRROR_H, false);
+   415→   415→
+   416→   416→  const floorMat = new THREE.ShaderMaterial({
+   417→   417→    vertexShader: FLOOR_VERT,
+   418→   418→    fragmentShader: FLOOR_FRAG,
+   419→   419→    uniforms: THREE.UniformsUtils.merge([
+   420→   420→      THREE.UniformsLib.fog,
+   421→   421→      {
+   422→   422→        tDiffuse: { value: null },
+   423→   423→        uTexMat: { value: new THREE.Matrix4() },
+   424→   424→        uTime: { value: 0 },
+   425→   425→        uMirror: { value: 1 },
+   426→   426→        uPoolCenter: { value: new THREE.Vector3(pool.cx, 0, pool.cz) },
+   427→   427→        uPoolHalf: { value: new THREE.Vector2(pool.w / 2, pool.d / 2) },
+   428→   428→      },
+   429→   429→    ]),
+   430→   430→    fog: true,
+   431→   431→  });
+   432→   432→  const fu = floorMat.uniforms as Record<string, { value: unknown }>;
+   433→   433→  // re-bind the live render-target AFTER merge — mergeUniforms clones texture
+   434→   434→  // values, which would sever the mirror sampling
+   435→   435→  fu.tDiffuse.value = mirrorRT.texture;
+   436→   436→
+   437→   437→  const floorSegs: THREE.Mesh[] = [];
+   438→   438→  const segs: [number, number, number, number][] = [
+   439→   439→    [cx, poolZ0 / 2, W, poolZ0],
+   440→   440→    [cx, (poolZ1 + D) / 2, W, D - poolZ1],
+   441→   441→    [poolX0 / 2, (poolZ0 + poolZ1) / 2, poolX0, poolZ1 - poolZ0],
+   442→   442→    [(poolX1 + W) / 2, (poolZ0 + poolZ1) / 2, W - poolX1, poolZ1 - poolZ0],
+   443→   443→  ];
+   444→   444→  for (const [px, pz, pw, pd] of segs) {
+   445→   445→    const f = new THREE.Mesh(new THREE.PlaneGeometry(pw, pd), floorMat);
+   446→   446→    f.rotation.x = -Math.PI / 2;
+   447→   447→    f.position.set(px, FLOOR_Y, pz);
+   448→   448→    group.add(f);
+   449→   449→    floorSegs.push(f);
+   450→   450→  }
+   451→   451→
+   452→   452→  // ── mirror camera rig (planar reflection across y = FLOOR_Y) ──
+   453→   453→  const virtualCam = new THREE.PerspectiveCamera();
+   454→   454→  const texMat = new THREE.Matrix4();
+   455→   455→  const _camPos = new THREE.Vector3();
+   456→   456→  const _camDir = new THREE.Vector3();
+   457→   457→  const _camUp = new THREE.Vector3();
+   458→   458→  const _mPos = new THREE.Vector3();
+   459→   459→  const _mTarget = new THREE.Vector3();
+   460→   460→  const _q = new THREE.Vector4();
+   461→   461→  const _plane = new THREE.Plane();
+   462→   462→  const BIAS = new THREE.Matrix4().set(
+   463→   463→    0.5, 0, 0, 0.5,
+   464→   464→    0, 0.5, 0, 0.5,
+   465→   465→    0, 0, 0.5, 0.5,
+   466→   466→    0, 0, 0, 1
+   467→   467→  );
+   468→   468→
+   469→   469→  function renderReflection(
+   470→   470→    renderer: THREE.WebGLRenderer,
+   471→   471→    scene: THREE.Scene,
+   472→   472→    camera: THREE.PerspectiveCamera,
+   473→   473→    hidden: THREE.Object3D[]
+   474→   474→  ) {
+   475→   475→    camera.getWorldPosition(_camPos);
+   476→   476→    camera.getWorldDirection(_camDir);
+   477→   477→    _camUp.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+   478→   478→
+   479→   479→    // mirror camera across the y = FLOOR_Y plane
+   480→   480→    _mPos.set(_camPos.x, 2 * FLOOR_Y - _camPos.y, _camPos.z);
+   481→   481→    const mDir = new THREE.Vector3(_camDir.x, -_camDir.y, _camDir.z);
+   482→   482→    const mUp = new THREE.Vector3(_camUp.x, -_camUp.y, _camUp.z);
+   483→   483→    _mTarget.copy(_mPos).add(mDir);
+   484→   484→    virtualCam.up.copy(mUp);
+   485→   485→    virtualCam.position.copy(_mPos);
+   486→   486→    virtualCam.lookAt(_mTarget);
+   487→   487→    virtualCam.near = camera.near;
+   488→   488→    virtualCam.far = camera.far;
+   489→   489→    virtualCam.projectionMatrix.copy(camera.projectionMatrix);
+   490→   490→    virtualCam.updateMatrixWorld();
+   491→   491→
+   492→   492→    // projective sampling matrix (world → mirror-clip → [0,1])
+   493→   493→    texMat.copy(BIAS)
+   494→   494→      .multiply(virtualCam.projectionMatrix)
+   495→   495→      .multiply(virtualCam.matrixWorldInverse);
+   496→   496→    (fu.uTexMat.value as THREE.Matrix4).copy(texMat);
+   497→   497→
+   498→   498→    // oblique near-plane clipping so nothing below the floor leaks in
+   499→   499→    _plane.setFromNormalAndCoplanarPoint(
+   500→   500→      new THREE.Vector3(0, 1, 0),
+   501→   501→      new THREE.Vector3(0, FLOOR_Y, 0)
+   502→   502→    );
+   503→   503→    _plane.applyMatrix4(virtualCam.matrixWorldInverse);
+   504→   504→    const clip = new THREE.Vector4(
+   505→   505→      _plane.normal.x, _plane.normal.y, _plane.normal.z, _plane.constant
+   506→   506→    );
+   507→   507→    const pm = virtualCam.projectionMatrix;
+   508→   508→    _q.x = (Math.sign(clip.x) + pm.elements[8]) / pm.elements[0];
+   509→   509→    _q.y = (Math.sign(clip.y) + pm.elements[9]) / pm.elements[5];
+   510→   510→    _q.z = -1.0;
+   511→   511→    _q.w = (1.0 + pm.elements[10]) / pm.elements[14];
+   512→   512→    clip.multiplyScalar(2.0 / clip.dot(_q));
+   513→   513→    pm.elements[2] = clip.x;
+   514→   514→    pm.elements[6] = clip.y;
+   515→   515→    pm.elements[10] = clip.z + 1.0;
+   516→   516→    pm.elements[14] = clip.w;
+   517→   517→    virtualCam.projectionMatrixInverse.copy(pm).invert();
+   518→   518→
+   519→   519→    // render the reflected world (self + caller-hidden objects removed)
+   520→   520→    for (const f of floorSegs) f.visible = false;
+   521→   521→    for (const h of hidden) h.visible = false;
+   522→   522→    const prevRT = renderer.getRenderTarget();
+   523→   523→    try {
+   524→   524→      renderer.setRenderTarget(mirrorRT);
+   525→   525→      renderer.render(scene, virtualCam);
+   526→   526→    } finally {
+   527→   527→      renderer.setRenderTarget(prevRT);
+   528→   528→      for (const f of floorSegs) f.visible = true;
+   529→   529→      for (const h of hidden) h.visible = true;
+   530→   530→    }
+   531→   531→  }
+   532→   532→
+   533→   533→  function setMirror(on: boolean) {
+   534→   534→    fu.uMirror.value = on ? 1 : 0;
+   535→   535→  }
+   536→   536→
+   537→   537→  // ── pool cavity ──
+   538→   538→  const cavityMat = new THREE.MeshStandardMaterial({
+   539→   539→    color: 0x0c2a33,
+   540→   540→    roughness: 0.85,
+   541→   541→    metalness: 0.15,
+   542→   542→  });
+   543→   543→  const cavityH = FLOOR_Y - POOL_FLOOR_Y;
+   544→   544→  const cw: [number, number, number, number][] = [
+   545→   545→    [pool.cx, POOL_FLOOR_Y + cavityH / 2, poolZ0, 0],
+   546→   546→    [pool.cx, POOL_FLOOR_Y + cavityH / 2, poolZ1, Math.PI],
+   547→   547→    [poolX0, POOL_FLOOR_Y + cavityH / 2, pool.cz, Math.PI / 2],
+   548→   548→    [poolX1, POOL_FLOOR_Y + cavityH / 2, pool.cz, -Math.PI / 2],
+   549→   549→  ];
+   550→   550→  for (const [px, py, pz, ry] of cw) {
+   551→   551→    const wMesh = new THREE.Mesh(
+   552→   552→      new THREE.PlaneGeometry(ry === 0 || ry === Math.PI ? pool.w : pool.d, cavityH),
+   553→   553→      cavityMat
+   554→   554→    );
+   555→   555→    wMesh.position.set(px, py, pz);
+   556→   556→    wMesh.rotation.y = ry;
+   557→   557→    group.add(wMesh);
+   558→   558→  }
+   559→   559→  const poolFloor = new THREE.Mesh(
+   560→   560→    new THREE.PlaneGeometry(pool.w, pool.d),
+   561→   561→    new THREE.MeshStandardMaterial({ color: 0x083038, roughness: 1, metalness: 0 })
+   562→   562→  );
+   563→   563→  poolFloor.rotation.x = -Math.PI / 2;
+   564→   564→  poolFloor.position.set(pool.cx, POOL_FLOOR_Y, pool.cz);
+   565→   565→  group.add(poolFloor);
+   566→   566→
+   567→   567→  // water rig (celestial lagoon — colors live in water.ts)
+   568→   568→  const water: WaterRig = buildWater(
+   569→   569→    pool.cx,
+   570→   570→    pool.cz,
+   571→   571→    pool.w - 0.06,
+   572→   572→    pool.d - 0.06,
+   573→   573→    WATER_Y,
+   574→   574→    POOL_FLOOR_Y
+   575→   575→  );
+   576→   576→  group.add(water.water, water.caustics);
+   577→   577→
+   578→   578→  // ── pool curb: gold with aqua underglow ──
+   579→   579→  const curbMat = new THREE.MeshStandardMaterial({
+   580→   580→    color: GOLD,
+   581→   581→    roughness: 0.28,
+   582→   582→    metalness: 1.0,
+   583→   583→  });
+   584→   584→  const glowMat = new THREE.MeshBasicMaterial({ color: AQUA_BRIGHT });
+   585→   585→  const curbH = 0.1;
+   586→   586→  const curbs: [number, number, number, number][] = [
+   587→   587→    [pool.cx, FLOOR_Y + curbH / 2, poolZ0 - 0.07, pool.w + 0.28],
+   588→   588→    [pool.cx, FLOOR_Y + curbH / 2, poolZ1 + 0.07, pool.w + 0.28],
+   589→   589→    [poolX0 - 0.07, FLOOR_Y + curbH / 2, pool.cz, pool.d + 0.28],
+   590→   590→    [poolX1 + 0.07, FLOOR_Y + curbH / 2, pool.cz, pool.d + 0.28],
+   591→   591→  ];
+   592→   592→  for (const [px, py, pz, len] of curbs) {
+   593→   593→    const horiz = pz < pool.cz - 2 || pz > pool.cz + 2;
+   594→   594→    const b = new THREE.Mesh(
+   595→   595→      new THREE.BoxGeometry(horiz ? len : 0.14, curbH, horiz ? 0.14 : len),
+   596→   596→      curbMat
+   597→   597→    );
+   598→   598→    b.position.set(px, py, pz);
+   599→   599→    group.add(b);
+   600→   600→    const gl = new THREE.Mesh(
+   601→   601→      new THREE.BoxGeometry(horiz ? len - 0.1 : 0.05, 0.025, horiz ? 0.05 : len - 0.1),
+   602→   602→      glowMat
+   603→   603→    );
+   604→   604→    const inZ = pz < cz ? 1 : -1;
+   605→   605→    const inX = px < cx ? 1 : -1;
+   606→   606→    gl.position.set(
+   607→   607→      px + (horiz ? 0 : inX * 0.06),
+   608→   608→      FLOOR_Y + 0.035,
+   609→   609→      pz + (horiz ? inZ * 0.06 : 0)
+   610→   610→    );
+   611→   611→    group.add(gl);
+   612→   612→  }
+   613→   613→
+   614→   614→  // ── gilded coffered ceiling with open elliptical oculus ──
+   615→   615→  const ocRx = Math.min(pool.w, pool.d) * 0.42; // ~2.0
+   616→   616→  const ocRy = Math.min(pool.w, pool.d) * 0.34;
+   617→   617→  const ceilShape = new THREE.Shape();
+   618→   618→  ceilShape.moveTo(-W / 2, -D / 2);
+   619→   619→  ceilShape.lineTo(W / 2, -D / 2);
+   620→   620→  ceilShape.lineTo(W / 2, D / 2);
+   621→   621→  ceilShape.lineTo(-W / 2, D / 2);
+   622→   622→  ceilShape.closePath();
+   623→   623→  const hole = new THREE.Path();
+   624→   624→  hole.absellipse(
+   625→   625→    pool.cx - cx,
+   626→   626→    pool.cz - cz,
+   627→   627→    ocRx,
+   628→   628→    ocRy,
+   629→   629→    0,
+   630→   630→    Math.PI * 2,
+   631→   631→    true,
+   632→   632→    0
+   633→   633→  );
+   634→   634→  ceilShape.holes.push(hole);
+   635→   635→  const ceilGeo = new THREE.ShapeGeometry(ceilShape, 48);
+   636→   636→  ceilGeo.rotateX(Math.PI / 2); // face down
+   637→   637→  scaleUV(ceilGeo, 1 / CELL, 1 / CELL);
+   638→   638→  const ceil = new THREE.Mesh(
+   639→   639→    ceilGeo,
+   640→   640→    new THREE.MeshStandardMaterial({ map: ceilTex, roughness: 0.5, metalness: 0.35 })
+   641→   641→  );
+   642→   642→  ceil.position.set(cx, WALL_H, cz);
+   643→   643→  group.add(ceil);
+   644→   644→
+   645→   645→  // oculus gold rim (ellipse approximated by segments)
+   646→   646→  const RIM_SEG = 40;
+   647→   647→  for (let i = 0; i < RIM_SEG; i++) {
+   648→   648→    const a0 = (i / RIM_SEG) * Math.PI * 2;
+   649→   649→    const a1 = ((i + 1) / RIM_SEG) * Math.PI * 2;
+   650→   650→    const x0 = pool.cx + Math.cos(a0) * ocRx;
+   651→   651→    const z0 = pool.cz + Math.sin(a0) * ocRy;
+   652→   652→    const x1 = pool.cx + Math.cos(a1) * ocRx;
+   653→   653→    const z1 = pool.cz + Math.sin(a1) * ocRy;
+   654→   654→    const len = Math.hypot(x1 - x0, z1 - z0) + 0.02;
+   655→   655→    const seg = new THREE.Mesh(new THREE.BoxGeometry(len, 0.14, 0.16), goldMat);
+   656→   656→    seg.position.set((x0 + x1) / 2, WALL_H - 0.02, (z0 + z1) / 2);
+   657→   657→    seg.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+   658→   658→    group.add(seg);
+   659→   659→  }
+   660→   660→  // sun glare disc just under the oculus (bloom feeder)
+   661→   661→  const glare = new THREE.Mesh(
+   662→   662→    new THREE.CircleGeometry(1, 32),
+   663→   663→    new THREE.MeshBasicMaterial({
+   664→   664→      map: glowTex,
+   665→   665→      color: new THREE.Color(1.9, 1.7, 1.35),
+   666→   666→      transparent: true,
+   667→   667→      blending: THREE.AdditiveBlending,
+   668→   668→      depthWrite: false,
+   669→   669→      fog: false,
+   670→   670→    })
+   671→   671→  );
+   672→   672→  glare.rotation.x = Math.PI / 2; // face down
+   673→   673→  glare.scale.set(ocRx * 0.72, ocRy * 0.72, 1);
+   674→   674→  glare.position.set(pool.cx, WALL_H - 0.1, pool.cz);
+   675→   675→  glare.renderOrder = 6;
+   676→   676→  group.add(glare);
+   677→   677→
+   678→   678→  // ── god-ray shafts falling from the oculus onto the lagoon ──
+   679→   679→  const shafts: THREE.Mesh[] = [];
+   680→   680→  const shaftSpecs: [number, number, number, number][] = [
+   681→   681→    // [radius, intensity, tiltZ, tiltX]
+   682→   682→    [0.42, 0.48, 0.02, 0.015],
+   683→   683→    [0.85, 0.32, -0.03, 0.02],
+   684→   684→    [1.35, 0.2, 0.05, -0.03],
+   685→   685→    [1.9, 0.11, -0.06, 0.04],
+   686→   686→  ];
+   687→   687→  const shaftHeight = WALL_H - WATER_Y;
+   688→   688→  for (const [r, inten, tz, tx] of shaftSpecs) {
+   689→   689→    const mat = new THREE.ShaderMaterial({
+   690→   690→      vertexShader: SHAFT_VERT,
+   691→   691→      fragmentShader: SHAFT_FRAG,
+   692→   692→      uniforms: {
+   693→   693→        uTime: { value: 0 },
+   694→   694→        uColor: { value: new THREE.Color(1.0, 0.93, 0.78) },
+   695→   695→        uIntensity: { value: inten },
+   696→   696→      },
+   697→   697→      transparent: true,
+   698→   698→      blending: THREE.AdditiveBlending,
+   699→   699→      depthWrite: false,
+   700→   700→      side: THREE.DoubleSide,
+   701→   701→    });
+   702→   702→    const m = new THREE.Mesh(
+   703→   703→      new THREE.CylinderGeometry(r, r * 0.82, shaftHeight, 24, 1, true),
+   704→   704→      mat
+   705→   705→    );
+   706→   706→    m.position.set(pool.cx, (WALL_H + WATER_Y) / 2, pool.cz);
+   707→   707→    m.rotation.z = tz;
+   708→   708→    m.rotation.x = tx;
+   709→   709→    m.renderOrder = 7;
+   710→   710→    group.add(m);
+   711→   711→    shafts.push(m);
+   712→   712→  }
+   713→   713→
+   714→   714→  // ── pillars: marble with gilded capitals ──
+   715→   715→  const pillarCells: [number, number][] = [
+   716→   716→    [2, 5],
+   717→   717→    [13, 5],
+   718→   718→    [2, 8],
+   719→   719→    [13, 8],
+   720→   720→  ];
+   721→   721→  for (const [col, row] of pillarCells) {
+   722→   722→    grid.cells[row * grid.w + col] = 1;
+   723→   723→    const px = col * CELL + CELL / 2;
+   724→   724→    const pz = row * CELL + CELL / 2;
+   725→   725→    const p = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H, 1.1), wallMat);
+   726→   726→    p.position.set(px, WALL_H / 2, pz);
+   727→   727→    group.add(p);
+   728→   728→    // gilded capital + base
+   729→   729→    for (const y of [WALL_H - 0.09, 0.09]) {
+   730→   730→      const cap = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.18, 1.26), goldMat);
+   731→   731→      cap.position.set(px, y, pz);
+   732→   732→      group.add(cap);
+   733→   733→    }
+   734→   734→    // aqua light strip facing the lagoon
+   735→   735→    const dir = Math.atan2(pool.cx - px, pool.cz - pz);
+   736→   736→    const strip = new THREE.Mesh(
+   737→   737→      new THREE.BoxGeometry(0.08, WALL_H - 0.7, 0.08),
+   738→   738→      new THREE.MeshBasicMaterial({ color: AQUA_BRIGHT })
+   739→   739→    );
+   740→   740→    strip.position.set(px + Math.sin(dir) * 0.58, WALL_H / 2, pz + Math.cos(dir) * 0.58);
+   741→   741→    group.add(strip);
+   742→   742→  }
+   743→   743→
+   744→   744→  // ── pedestals ──
+   745→   745→  const pedMat = new THREE.MeshStandardMaterial({
+   746→   746→    map: pedTex,
+   747→   747→    roughness: 0.3,
+   748→   748→    metalness: 0.25,
+   749→   749→  });
+   750→   750→  const capMat = new THREE.MeshStandardMaterial({
+   751→   751→    color: 0xf5efdd,
+   752→   752→    roughness: 0.12,
+   753→   753→    metalness: 0.85,
+   754→   754→    emissive: 0x40300e,
+   755→   755→    emissiveIntensity: 0.7,
+   756→   756→  });
+   757→   757→  const spawn = { x: 7 * CELL + CELL / 2, z: 12 * CELL + CELL / 2, yaw: 0 };
+   758→   758→  const pedestals: PedestalInfo[] = [];
+   759→   759→  for (let row = 0; row < grid.h; row++) {
+   760→   760→    for (let col = 0; col < grid.w; col++) {
+   761→   761→      if (grid.cells[row * grid.w + col] !== 3) continue;
+   762→   762→      const px = col * CELL + CELL / 2;
+   763→   763→      const pz = row * CELL + CELL / 2;
+   764→   764→      const ped = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE, PED_TOP - 0.02, PED_SIZE), pedMat);
+   765→   765→      ped.position.set(px, (PED_TOP - 0.02) / 2, pz);
+   766→   766→      group.add(ped);
+   767→   767→      const cap = new THREE.Mesh(new THREE.BoxGeometry(PED_SIZE + 0.05, 0.025, PED_SIZE + 0.05), capMat);
+   768→   768→      cap.position.set(px, PED_TOP - 0.012, pz);
+   769→   769→      group.add(cap);
+   770→   770→      const facing = Math.atan2(spawn.x - px, spawn.z - pz);
+   771→   771→      pedestals.push({ col, row, pos: new THREE.Vector3(px, 0, pz), facing, top: PED_TOP });
+   772→   772→    }
+   773→   773→  }
+   774→   774→
+   775→   775→  // ── halo light strips ──
+   776→   776→  group.add(neonStrip(W - 1.2, AQUA_BRIGHT, [cx, 3.35, 0.06], 0, beamTex)); // N aqua
+   777→   777→  group.add(neonStrip(D - 1.2, AQUA_BRIGHT, [W - 0.06, 3.35, cz], Math.PI / 2, beamTex)); // E aqua
+   778→   778→  group.add(neonStrip(D - 1.2, GOLD_BRIGHT, [0.06, 3.35, cz], -Math.PI / 2, beamTex)); // W gold
+   779→   779→  group.add(neonStrip(6.5, GOLD_BRIGHT, [cx - 5.6, 3.1, D - 0.06], Math.PI, beamTex)); // S gold L
+   780→   780→  group.add(neonStrip(6.5, GOLD_BRIGHT, [cx + 5.6, 3.1, D - 0.06], Math.PI, beamTex)); // S gold R
+   781→   781→
+   782→   782→  group.add(sign("CELESTIA GALLERIA", 5.2, [cx, 2.55, 0.03], 0, "#ffd98c"));
+   783→   783→  group.add(sign("EXIT", 1.5, [cx, 2.2, D - 0.03], Math.PI, "#9de8b8"));
+   784→   784→  group.add(sign("OPTICS", 1.9, [3 * CELL + 0.6, 1.9, 0.03], 0, "#3fd8c8"));
+   785→   785→  group.add(sign("GAMING", 1.9, [12 * CELL + 0.6, 1.9, 0.03], 0, "#3fd8c8"));
+   786→   786→  group.add(sign("AUDIO", 1.9, [W - 0.03, 1.9, 7 * CELL + 1.8], -Math.PI / 2, "#3fd8c8"));
+   787→   787→  group.add(sign("WEARABLES", 2.2, [0.03, 1.9, 7 * CELL + 0.6], Math.PI / 2, "#3fd8c8"));
+   788→   788→  group.add(sign("AERIAL", 1.9, [11 * CELL + 0.6, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
+   789→   789→
+   790→   790→  // ── lights (temple of retail) ──
+   791→   791→  const hemi = new THREE.HemisphereLight(0xfff5e0, 0x6b7a80, 0.8);
+   792→   792→  group.add(hemi);
+   793→   793→  const sun = new THREE.DirectionalLight(0xffeecf, 1.5);
+   794→   794→  sun.position.set(pool.cx + 2.5, WALL_H + 5, pool.cz - 1.5);
+   795→   795→  sun.target.position.set(pool.cx, 0, pool.cz);
+   796→   796→  group.add(sun, sun.target);
+   797→   797→  const oculusGlow = new THREE.PointLight(0xffe4b0, 14, 15, 2);
+   798→   798→  oculusGlow.position.set(pool.cx, WALL_H - 0.8, pool.cz);
+   799→   799→  group.add(oculusGlow);
+   800→   800→  const poolLight = new THREE.PointLight(0x49e0d0, 24, 22, 2);
+   801→   801→  poolLight.position.set(pool.cx, WATER_Y + 0.7, pool.cz);
+   802→   802→  group.add(poolLight);
+   803→   803→  const exitLight = new THREE.PointLight(0xffd98c, 9, 12, 2);
+   804→   804→  exitLight.position.set(spawn.x, 2.6, spawn.z - 1.5);
+   805→   805→  group.add(exitLight);
+   806→   806→  const seraphLight = new THREE.PointLight(0xfff0c8, 7, 11, 2);
+   807→   807→  seraphLight.position.set(3 * CELL + 0.6, 2.9, 9 * CELL + 0.6);
+   808→   808→  group.add(seraphLight);
+   809→   809→
+   810→   810→  // ── angel dust: golden motes rising through the light ──
+   811→   811→  const DUST = 160;
+   812→   812→  const dustGeo = new THREE.BufferGeometry();
+   813→   813→  const dustPos = new Float32Array(DUST * 3);
+   814→   814→  const dustSeed = new Float32Array(DUST);
+   815→   815→  for (let i = 0; i < DUST; i++) {
+   816→   816→    dustPos[i * 3] = Math.random() * W;
+   817→   817→    dustPos[i * 3 + 1] = 0.4 + Math.random() * (WALL_H - 0.8);
+   818→   818→    dustPos[i * 3 + 2] = Math.random() * D;
+   819→   819→    dustSeed[i] = Math.random() * Math.PI * 2;
+   820→   820→  }
+   821→   821→  dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+   822→   822→  const dust = new THREE.Points(
+   823→   823→    dustGeo,
+   824→   824→    new THREE.PointsMaterial({
+   825→   825→      color: new THREE.Color(0xffdf9e).multiplyScalar(1.8),
+   826→   826→      size: 0.03,
+   827→   827→      transparent: true,
+   828→   828→      opacity: 0.5,
+   829→   829→      blending: THREE.AdditiveBlending,
+   830→   830→      depthWrite: false,
+   831→   831→      fog: true,
+   832→   832→    })
+   833→   833→  );
+   834→   834→  group.add(dust);
+   835→   835→
+   836→   836→  // ── wandering light orbs (soft golden spirits) ──
+   837→   837→  const orbs: THREE.Sprite[] = [];
+   838→   838→  const orbSpecs: [number, number, number, number, number][] = [
+   839→   839→    // [x, z, height, scale, speed]
+   840→   840→    [3.5, 3.5, 2.6, 0.5, 0.11],
+   841→   841→    [15.5, 4.2, 3.1, 0.38, 0.14],
+   842→   842→    [16.2, 12.5, 2.2, 0.55, 0.09],
+   843→   843→    [3.0, 12.8, 3.4, 0.42, 0.12],
+   844→   844→    [9.6, 2.6, 3.0, 0.34, 0.16],
+   845→   845→    [9.6, 14.2, 2.5, 0.46, 0.1],
+   846→   846→    [6.2, 8.4, 3.6, 0.3, 0.18],
+   847→   847→  ];
+   848→   848→  for (const [ox, oz, oy, sc, sp] of orbSpecs) {
+   849→   849→    const s = new THREE.Sprite(
+   850→   850→      new THREE.SpriteMaterial({
+   851→   851→        map: glowTex,
+   852→   852→        color: new THREE.Color(0xffe4ae).multiplyScalar(1.7),
+   853→   853→        transparent: true,
+   854→   854→        blending: THREE.AdditiveBlending,
+   855→   855→        depthWrite: false,
+   856→   856→        fog: true,
+   857→   857→      })
+   858→   858→    );
+   859→   859→    s.scale.set(sc, sc, 1);
+   860→   860→    s.userData = { ox, oz, oy, sp, ph: Math.random() * Math.PI * 2 };
+   861→   861→    orbs.push(s);
+   862→   862→    group.add(s);
+   863→   863→  }
+   864→   864→
+   865→   865→  return {
+   866→   866→    group,
+   867→   867→    grid,
+   868→   868→    pedestals,
+   869→   869→    pool,
+   870→   870→    spawn,
+   871→   871→    update(t: number, dt: number) {
+   872→   872→      water.update(t);
+   873→   873→      fu.uTime.value = t;
+   874→   874→      skyMat.uniforms.uTime.value = t;
+   875→   875→      for (let i = 0; i < shafts.length; i++) {
+   876→   876→        const m = shafts[i];
+   877→   877→        const u = (m.material as THREE.ShaderMaterial).uniforms;
+   878→   878→        u.uTime.value = t;
+   879→   879→        u.uIntensity.value = shaftSpecs[i][1] * (0.82 + 0.18 * Math.sin(t * 0.7 + i * 1.7));
+   880→   880→      }
+   881→   881→      // lagoon glow breathing
+   882→   882→      poolLight.intensity = 22 + Math.sin(t * 1.7) * 4;
+   883→   883→      oculusGlow.intensity = 13 + Math.sin(t * 0.8) * 3;
+   884→   884→      // seraph pulse (gentle, no doom flicker in heaven)
+   885→   885→      seraphLight.intensity = 6.5 + Math.sin(t * 0.9) * 2.5;
+   886→   886→      // angel dust rises with a slow swirl
+   887→   887→      const pos = dustGeo.attributes.position as THREE.BufferAttribute;
+   888→   888→      for (let i = 0; i < DUST; i++) {
+   889→   889→        let y = pos.getY(i) + dt * 0.07;
+   890→   890→        let x = pos.getX(i) + Math.sin(t * 0.35 + dustSeed[i]) * dt * 0.03;
+   891→   891→        if (y > WALL_H - 0.3) y = 0.4;
+   892→   892→        pos.setY(i, y);
+   893→   893→        pos.setX(i, Math.max(0.2, Math.min(W - 0.2, x)));
+   894→   894→      }
+   895→   895→      pos.needsUpdate = true;
+   896→   896→      // light orbs drift on lissajous paths
+   897→   897→      for (const s of orbs) {
+   898→   898→        const ud = s.userData as { ox: number; oz: number; oy: number; sp: number; ph: number };
+   899→   899→        s.position.set(
+   900→   900→          ud.ox + Math.sin(t * ud.sp + ud.ph) * 1.1,
+   901→   901→          ud.oy + Math.sin(t * ud.sp * 0.7 + ud.ph * 2.0) * 0.35,
+   902→   902→          ud.oz + Math.cos(t * ud.sp * 0.85 + ud.ph) * 1.1
+   903→   903→        );
+   904→   904→      }
+   905→   905→    },
+   906→   906→    renderReflection,
+   907→   907→    setMirror,
+   908→   908→  };
+   909→   909→}
+   910→   910→

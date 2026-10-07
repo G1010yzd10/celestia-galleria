@@ -1,0 +1,12 @@
+{
+  "[project]/src/components/doom/DoomShop.tsx [app-client] (ecmascript, next/dynamic entry)": {
+    "id": "[project]/src/components/doom/DoomShop.tsx [app-client] (ecmascript, next/dynamic entry)",
+    "files": [
+      "static/chunks/src_972a1023._.js",
+      "static/chunks/node_modules_three_build_three_module_f7d46d9b.js",
+      "static/chunks/node_modules_three_examples_jsm_d7228e2c._.js",
+      "static/chunks/node_modules_bc804978._.js",
+      "static/chunks/src_components_doom_DoomShop_tsx_24efd351._.js"
+    ]
+  }
+}

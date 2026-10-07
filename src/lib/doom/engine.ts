@@ -4,16 +4,17 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildLevel, FLOOR_Y, type LevelRig } from "./level";
-import { CATALOG, type ProductSpec } from "./products";
+import { CATALOG } from "./products";
 import { bakeProduct, sheetToAtlas, type BakedProduct } from "./baker";
 import { ProductSprite } from "./sprites";
 import { DoomAudio } from "./audio";
 import { mem, trackedCanvasTexture } from "./memory";
-import type { EngineStats } from "./types";
+import type { EngineStats, ProductSpec } from "./types";
 
-// ─── DOOM MART CELESTIA — one WebGL context, temple-of-retail pipeline ───────
-// ACES filmic tone mapping + Unreal bloom (quarter-res chain) + a true planar
-// mirror floor — still Doom-grade lightness, still the 4 MB club.
+// ─── CELESTIA GALLERIA — one WebGL context, temple-of-retail pipeline ───────
+// ACES filmic tone mapping + 4×MSAA HalfFloat post chain + Unreal bloom —
+// the Doom methods stayed, the 4 MB budget was broken with intent.
+// Every byte spent is tracked honestly on the HUD.
 
 export interface EngineCallbacks {
   onStats?: (s: EngineStats) => void;
@@ -52,6 +53,7 @@ export class DoomEngine {
   private qualityWarmup = 3.0; // REAL seconds before auto-degrade may trigger
   private realT = 0; // wall-clock time (immune to the dt cap)
   private qualityLocked = false; // E2E/testing: freeze the current tier
+  private celebrateT = 0; // checkout blessing: bloom + exposure swell
 
   // input state
   private keys = new Set<string>();
@@ -108,11 +110,11 @@ export class DoomEngine {
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // AAA-grade filmic response — highlights roll off like heaven, not clip
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.toneMappingExposure = 1.04;
     // composer-owned frame: we reset stats manually once per frame
     this.renderer.info.autoReset = false;
 
@@ -120,10 +122,12 @@ export class DoomEngine {
     this.camera.rotation.order = "YXZ";
 
     // ── world ──
-    this.scene.fog = new THREE.FogExp2(0xe9eef0, 0.03);
+    this.scene.fog = new THREE.FogExp2(0xe9eef0, 0.026);
     this.scene.background = new THREE.Color(0xdcedf0);
-    this.level = buildLevel();
+    this.level = buildLevel(this.renderer);
     this.scene.add(this.level.group);
+    // the pearl heavens become the PBR environment — gold drinks the sky
+    this.scene.environment = this.level.envTexture;
 
     // ── bake all products to 9-angle sprite atlases (the Doom method) ──
     for (let i = 0; i < CATALOG.length && i < this.level.pedestals.length; i++) {
@@ -147,13 +151,20 @@ export class DoomEngine {
     }
 
     // ── post pipeline: render → Unreal bloom → filmic output ──
-    this.composer = new EffectComposer(this.renderer);
+    // budget broken ON PURPOSE: 4×MSAA HalfFloat frame chain — post-processed
+    // geometry keeps crisp silhouette edges instead of the composer's blur.
+    const bufSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    const frameRT = new THREE.WebGLRenderTarget(bufSize.x, bufSize.y, {
+      samples: 4,
+      type: THREE.HalfFloatType,
+    });
+    this.composer = new EffectComposer(this.renderer, frameRT);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(
-      new THREE.Vector2(360, 360),
-      0.42, // strength — restrained divine glow
-      0.55, // radius
-      0.88 // threshold — only true light blooms
+      new THREE.Vector2(512, 512),
+      0.5, // strength — the divine glow, unchained
+      0.6, // radius
+      0.85 // threshold — only true light blooms
     );
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -236,9 +247,10 @@ export class DoomEngine {
       }
     };
     this.onTouchEnd = (e) => {
-      if (!this.touchLook) return;
+      const tl = this.touchLook;
+      if (!tl) return;
       for (const t of Array.from(e.changedTouches)) {
-        if (t.identifier === this.touchLook.id) this.touchLook = null;
+        if (t.identifier === tl.id) this.touchLook = null;
       }
     };
 
@@ -259,6 +271,12 @@ export class DoomEngine {
     // test/debug hook (harmless in prod, aids E2E verification)
     (window as unknown as { __doomDebug?: object }).__doomDebug = {
       pos: () => ({ x: +this.pos.x.toFixed(2), z: +this.pos.z.toFixed(2), yaw: +this.yaw.toFixed(3) }),
+      tp: (x: number, z: number, yaw?: number) => {
+        this.pos.set(x, EYE, z);
+        if (typeof yaw === "number") this.yaw = yaw;
+        this.vel.set(0, 0, 0);
+        return { x, z, yaw: +this.yaw.toFixed(3) };
+      },
       paused: () => this.paused,
       frames: () =>
         this.sprites.map((s) => ({
@@ -293,7 +311,7 @@ export class DoomEngine {
     this.mirrorOn = ultra;
     this.level.setMirror(ultra);
     this.bloom.enabled = ultra;
-    const pr = ultra ? Math.min(window.devicePixelRatio, 1.75) : 1;
+    const pr = ultra ? Math.min(window.devicePixelRatio, 2) : 1;
     this.renderer.setPixelRatio(pr);
     this.composer.setPixelRatio(pr);
     this.resize();
@@ -310,6 +328,11 @@ export class DoomEngine {
 
   setSound(on: boolean) {
     this.audio.setEnabled(on);
+  }
+
+  /** checkout blessing — a swell of bloom and light through the temple */
+  celebrate() {
+    this.celebrateT = 2.2;
   }
 
   /** public interact (mobile E button / dialog triggers) */
@@ -361,7 +384,8 @@ export class DoomEngine {
       this.update(dt);
       // manual stats reset: one honest count for the whole composed frame
       this.renderer.info.reset();
-      // 1) floor mirror pass (renders the reflected world into the marble)
+      // 1) floor mirror pass (renders the reflected world into the marble
+      //    AND — budget broken edition — the lagoon drinks the same target)
       if (this.mirrorOn) {
         this.level.renderReflection(
           this.renderer,
@@ -407,6 +431,7 @@ export class DoomEngine {
     });
     this.bloom.dispose();
     this.composer.dispose();
+    this.level.envRT.dispose();
     this.renderer.dispose();
     mem.reset();
   }
@@ -473,6 +498,17 @@ export class DoomEngine {
     // world
     this.level.update(this.t, dt);
     for (const s of this.sprites) s.update(this.camera.position, this.t, dt);
+
+    // checkout blessing: bloom & exposure swell, then settle back
+    if (this.celebrateT > 0) {
+      this.celebrateT = Math.max(0, this.celebrateT - dt);
+      const k = this.celebrateT / 2.2;
+      if (this.bloom.enabled) this.bloom.strength = 0.5 + Math.sin((2.2 - this.celebrateT) * 9) * 0.3 * k;
+      this.renderer.toneMappingExposure = 1.04 + 0.12 * k;
+    } else {
+      this.bloom.strength = 0.5;
+      this.renderer.toneMappingExposure = 1.04;
+    }
 
     // live stats for the automap
     this.lastStats.px = this.pos.x;

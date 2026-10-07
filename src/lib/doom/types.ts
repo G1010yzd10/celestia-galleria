@@ -1,4 +1,4 @@
-// ─── DOOM MART :: shared types ──────────────────────────────────────────────
+// ─── CELESTIA GALLERIA ✦ :: shared types ────────────────────────────────────
 export interface ProductSpec {
   id: string;
   name: string;
@@ -43,7 +43,7 @@ export interface LevelGrid {
 
 export const CELL = 1.2;
 
-/** 16 × 14 arena — '#' wall, '.' floor, '~' nukage pool, 'P' pedestal */
+/** 16 × 14 arena — '#' wall, '.' floor, '~' lagoon, 'P' pedestal */
 export const MAP_ART = [
   "################",
   "#..............#",
@@ -56,7 +56,7 @@ export const MAP_ART = [
   "#..............#",
   "#..P.......P...#",
   "#..............#",
-  "#..............#",
+  "#..P........P..#",
   "#......^.......#", // ^ = spawn
   "################",
 ];

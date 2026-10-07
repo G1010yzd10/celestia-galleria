@@ -112,24 +112,24 @@ export function TitleScreen({ onEnter }: { onEnter: () => void }) {
       {/* logo */}
       <div className="relative z-10 flex flex-col items-center gap-1 px-4 -mt-16 md:-mt-24">
         <div className="text-[11px] md:text-sm tracking-[0.5em] text-amber-200/80 font-mono">
-          CELESTIA GALLERIA PRESENTS
+          ✦ THE TEMPLE OF RETAIL ✦
         </div>
         <h1
-          className="font-mono font-black text-5xl md:text-8xl leading-none text-center"
+          className="font-mono font-black text-4xl sm:text-5xl md:text-7xl leading-none text-center whitespace-nowrap"
           style={{
             color: "#ffe9b8",
             textShadow:
               "0 0 18px rgba(255,214,140,0.9), 0 0 60px rgba(255,190,90,0.55), 0 4px 0 #a06a1e, 0 6px 0 #6b430e",
-            letterSpacing: "0.06em",
+            letterSpacing: "0.04em",
           }}
         >
-          DOOM MART
+          CELESTIA GALLERIA
         </h1>
-        <div className="font-mono text-teal-200/90 text-xs md:text-base tracking-[0.35em] mt-2">
-          ✦ CELESTIAL EDITION — 3D LITE COMMERCE ✦
+        <div className="font-mono text-teal-200/90 text-[11px] md:text-base tracking-[0.25em] mt-2 text-center">
+          ✦ FORMERLY DOOM MART — REBORN IN GOLDEN LIGHT ✦
         </div>
-        <div className="font-mono text-neutral-500 text-[10px] md:text-xs mt-1">
-          9-ANGLE SPRITES · &lt;4MB VRAM · ZERO DOWNLOADS
+        <div className="font-mono text-neutral-500 text-[10px] md:text-xs mt-1 text-center">
+          9-ANGLE SPRITES · MIRROR MARBLE · BUDGET GLORIOUSLY BROKEN · ZERO DOWNLOADS
         </div>
 
         <Button

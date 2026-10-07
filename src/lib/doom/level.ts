@@ -4,10 +4,11 @@ import { texWall, texCeil, texPedestal, texSign, texGlow, texBeam } from "./text
 import { trackedCanvasTexture, mem } from "./memory";
 import { buildWater, type WaterRig } from "./water";
 
-// ─── CELESTIA GALLERIA — the atrium between worlds ──────────────────────────
+// ─── CELESTIA GALLERIA — the atrium between worlds, BUDGET BROKEN ed. ──────
 // Ivory marble, gilded coffered ceiling with an open oculus, god-ray light
-// shafts falling onto a celestial lagoon, and a real planar-mirror marble
-// floor — all still inside the 4 MB Doom club.
+// shafts falling onto a celestial lagoon, a true planar-mirror marble floor —
+// and now a PMREM sky probe so every gold surface drinks the heavens.
+// The 4 MB Doom club was left behind on purpose; the method stayed.
 
 export const WALL_H = 4.2;
 export const PED_SIZE = 0.9;
@@ -30,6 +31,10 @@ export interface LevelRig {
   pedestals: PedestalInfo[];
   pool: { cx: number; cz: number; w: number; d: number };
   spawn: { x: number; z: number; yaw: number };
+  /** PMREM-baked pearl-sky cubemap — set as scene.environment by the engine */
+  envTexture: THREE.Texture;
+  /** owning RT for envTexture (disposed by the engine) */
+  envRT: THREE.WebGLRenderTarget;
   update(t: number, dt: number): void;
   /** render the scene into the floor's mirror target (call before main pass) */
   renderReflection(
@@ -318,7 +323,7 @@ const GOLD = 0xc9962e;
 const GOLD_BRIGHT = new THREE.Color(0xffd98c).multiplyScalar(2.0);
 const AQUA_BRIGHT = new THREE.Color(0x3fd8c8).multiplyScalar(2.0);
 
-export function buildLevel(): LevelRig {
+export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   const group = new THREE.Group();
   const grid = parseMap();
   const W = grid.w * CELL; // 19.2
@@ -348,7 +353,6 @@ export function buildLevel(): LevelRig {
     emissive: 0x2a1c05,
     emissiveIntensity: 0.6,
   });
-
   // ── sky dome (seen through the oculus) ──
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: SKY_VERT,
@@ -367,6 +371,24 @@ export function buildLevel(): LevelRig {
   sky.position.set(cx, 1.5, cz);
   sky.renderOrder = -10;
   group.add(sky);
+
+  // ── environment probe: bake the pearl heavens into a PMREM cubemap so ──
+  // every gold surface (cornices, capitals, reliquaries, halos) reflects the
+  // sky. THE budget-broken glow-up: ~1.4 MB once, infinite divinity.
+  const envScene = new THREE.Scene();
+  const envSky = new THREE.Mesh(new THREE.SphereGeometry(30, 24, 14), skyMat);
+  envScene.add(envSky);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envRT = pmrem.fromScene(envScene, 0.07);
+  pmrem.dispose();
+  envSky.geometry.dispose();
+  const envTexture = envRT.texture;
+  // cubemap ≈ 6 faces + mips — registered so the HUD stays honest
+  mem.register(envTexture, 256, 256 * 6, true);
+
+  // ── heaven reflections: every PBR surface now drinks the sky probe ──
+  wallMat.envMapIntensity = 0.4;
+  goldMat.envMapIntensity = 1.35;
 
   // ── perimeter walls ──
   group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, 0], 0));
@@ -403,15 +425,19 @@ export function buildLevel(): LevelRig {
   };
 
   // ── mirror marble floor (4 segments around the pool hole) ──
-  // reflection render target — 448×224 RGBA, honestly tracked in the budget
-  // (the freed floor-texture bytes pay for the sharper mirror)
-  const MIRROR_W = 448;
-  const MIRROR_H = 224;
+  // reflection render target — 896×448 RGBA, honestly tracked. The 4 MB club
+  // is gone; the mirror got 4× the pixels so the reflections read like glass.
+  const MIRROR_W = 896;
+  const MIRROR_H = 448;
   const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H);
   mirrorRT.texture.minFilter = THREE.LinearFilter;
   mirrorRT.texture.magFilter = THREE.LinearFilter;
   mirrorRT.texture.generateMipmaps = false;
   mem.register(mirrorRT.texture, MIRROR_W, MIRROR_H, false);
+
+  // shared mirror projection matrix — the floor AND the lagoon water sample
+  // through this exact object (updated in place every frame)
+  const texMat = new THREE.Matrix4();
 
   const floorMat = new THREE.ShaderMaterial({
     vertexShader: FLOOR_VERT,
@@ -431,8 +457,9 @@ export function buildLevel(): LevelRig {
   });
   const fu = floorMat.uniforms as Record<string, { value: unknown }>;
   // re-bind the live render-target AFTER merge — mergeUniforms clones texture
-  // values, which would sever the mirror sampling
+  // values, which would sever the mirror sampling. Same for the shared matrix.
   fu.tDiffuse.value = mirrorRT.texture;
+  fu.uTexMat.value = texMat;
 
   const floorSegs: THREE.Mesh[] = [];
   const segs: [number, number, number, number][] = [
@@ -451,7 +478,6 @@ export function buildLevel(): LevelRig {
 
   // ── mirror camera rig (planar reflection across y = FLOOR_Y) ──
   const virtualCam = new THREE.PerspectiveCamera();
-  const texMat = new THREE.Matrix4();
   const _camPos = new THREE.Vector3();
   const _camDir = new THREE.Vector3();
   const _camUp = new THREE.Vector3();
@@ -489,11 +515,12 @@ export function buildLevel(): LevelRig {
     virtualCam.projectionMatrix.copy(camera.projectionMatrix);
     virtualCam.updateMatrixWorld();
 
-    // projective sampling matrix (world → mirror-clip → [0,1])
-    texMat.copy(BIAS)
+    // projective sampling matrix (world → mirror-clip → [0,1]) — shared object,
+    // the water shader samples the same live matrix
+    texMat
+      .copy(BIAS)
       .multiply(virtualCam.projectionMatrix)
       .multiply(virtualCam.matrixWorldInverse);
-    (fu.uTexMat.value as THREE.Matrix4).copy(texMat);
 
     // oblique near-plane clipping so nothing below the floor leaks in
     _plane.setFromNormalAndCoplanarPoint(
@@ -532,6 +559,7 @@ export function buildLevel(): LevelRig {
 
   function setMirror(on: boolean) {
     fu.uMirror.value = on ? 1 : 0;
+    water.setMirror(on);
   }
 
   // ── pool cavity ──
@@ -564,14 +592,16 @@ export function buildLevel(): LevelRig {
   poolFloor.position.set(pool.cx, POOL_FLOOR_Y, pool.cz);
   group.add(poolFloor);
 
-  // water rig (celestial lagoon — colors live in water.ts)
+  // water rig (celestial lagoon — drinks from the shared planar mirror)
   const water: WaterRig = buildWater(
     pool.cx,
     pool.cz,
     pool.w - 0.06,
     pool.d - 0.06,
     WATER_Y,
-    POOL_FLOOR_Y
+    POOL_FLOOR_Y,
+    mirrorRT.texture,
+    texMat
   );
   group.add(water.water, water.caustics);
 
@@ -675,17 +705,25 @@ export function buildLevel(): LevelRig {
   glare.renderOrder = 6;
   group.add(glare);
 
-  // ── god-ray shafts falling from the oculus onto the lagoon ──
+  // ── god-ray shafts: fake volumetric light cylinders ──
+  // four nested cones down the oculus onto the lagoon, plus four slim
+  // columns of sanctum light over the pedestal shrines
   const shafts: THREE.Mesh[] = [];
-  const shaftSpecs: [number, number, number, number][] = [
-    // [radius, intensity, tiltZ, tiltX]
-    [0.42, 0.48, 0.02, 0.015],
-    [0.85, 0.32, -0.03, 0.02],
-    [1.35, 0.2, 0.05, -0.03],
-    [1.9, 0.11, -0.06, 0.04],
+  const shaftSpecs: [number, number, number, number, number, number][] = [
+    // [x, z, radius, intensity, tiltZ, tiltX] — first 4 = oculus, then pedestals
+    [pool.cx, pool.cz, 0.42, 0.5, 0.02, 0.015],
+    [pool.cx, pool.cz, 0.85, 0.34, -0.03, 0.02],
+    [pool.cx, pool.cz, 1.35, 0.22, 0.05, -0.03],
+    [pool.cx, pool.cz, 1.9, 0.12, -0.06, 0.04],
+    [4.2, 3.0, 0.5, 0.15, 0.03, -0.02],
+    [15.0, 3.0, 0.5, 0.15, -0.03, 0.02],
+    [4.2, 13.8, 0.55, 0.12, 0.02, 0.03],
+    [15.0, 13.8, 0.55, 0.12, -0.02, -0.03],
   ];
-  const shaftHeight = WALL_H - WATER_Y;
-  for (const [r, inten, tz, tx] of shaftSpecs) {
+  for (let i = 0; i < shaftSpecs.length; i++) {
+    const [sx, sz, r, inten, tz, tx] = shaftSpecs[i];
+    const bottom = i < 4 ? WATER_Y : FLOOR_Y; // oculus shafts fall into the lagoon
+    const shaftHeight = WALL_H - bottom;
     const mat = new THREE.ShaderMaterial({
       vertexShader: SHAFT_VERT,
       fragmentShader: SHAFT_FRAG,
@@ -703,7 +741,7 @@ export function buildLevel(): LevelRig {
       new THREE.CylinderGeometry(r, r * 0.82, shaftHeight, 24, 1, true),
       mat
     );
-    m.position.set(pool.cx, (WALL_H + WATER_Y) / 2, pool.cz);
+    m.position.set(sx, (WALL_H + bottom) / 2, sz);
     m.rotation.z = tz;
     m.rotation.x = tx;
     m.renderOrder = 7;
@@ -746,6 +784,7 @@ export function buildLevel(): LevelRig {
     map: pedTex,
     roughness: 0.3,
     metalness: 0.25,
+    envMapIntensity: 0.5,
   });
   const capMat = new THREE.MeshStandardMaterial({
     color: 0xf5efdd,
@@ -753,6 +792,7 @@ export function buildLevel(): LevelRig {
     metalness: 0.85,
     emissive: 0x40300e,
     emissiveIntensity: 0.7,
+    envMapIntensity: 1.25,
   });
   const spawn = { x: 7 * CELL + CELL / 2, z: 12 * CELL + CELL / 2, yaw: 0 };
   const pedestals: PedestalInfo[] = [];
@@ -772,6 +812,64 @@ export function buildLevel(): LevelRig {
     }
   }
 
+  // ── gilded reliquaries — the Doom crates, promoted to heaven ──
+  // Mirror marble under them, pearl sky painted on their gold: the boxes
+  // the original request dreamed of, drinking both reflections at once.
+  const crateMat = new THREE.MeshPhysicalMaterial({
+    color: GOLD,
+    metalness: 1.0,
+    roughness: 0.16,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.14,
+    envMapIntensity: 1.6,
+    emissive: 0x241804,
+    emissiveIntensity: 0.45,
+  });
+  const crateTrimMat = new THREE.MeshPhysicalMaterial({
+    color: 0x8f6a1e,
+    metalness: 1.0,
+    roughness: 0.3,
+    envMapIntensity: 1.2,
+  });
+  function reliquary(x: number, z: number, s: number, rotY: number) {
+    const rg = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.62, s), crateMat);
+    body.position.y = s * 0.31;
+    rg.add(body);
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(s * 1.03, s * 0.07, s * 1.03), crateTrimMat);
+    belt.position.y = s * 0.42;
+    rg.add(belt);
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(s * 1.05, s * 0.18, s * 1.05), crateMat);
+    lid.position.y = s * 0.62 + s * 0.09;
+    rg.add(lid);
+    // relic gem — a sliver of the aqua lagoon, glowing through the gold
+    const gem = new THREE.Mesh(
+      new THREE.BoxGeometry(s * 0.22, s * 0.15, s * 0.22),
+      new THREE.MeshStandardMaterial({
+        color: 0x67e8d8,
+        emissive: 0x2dd4bf,
+        emissiveIntensity: 2.6,
+        roughness: 0.2,
+        metalness: 0.1,
+      })
+    );
+    gem.position.y = s * 0.8 + s * 0.14;
+    rg.add(gem);
+    rg.position.set(x, FLOOR_Y, z);
+    rg.rotation.y = rotY;
+    group.add(rg);
+    // block the cell so pilgrims orbit, not clip
+    const col = Math.floor(x / CELL);
+    const row = Math.floor(z / CELL);
+    if (col >= 0 && col < grid.w && row >= 0 && row < grid.h) {
+      grid.cells[row * grid.w + col] = 1;
+    }
+  }
+  reliquary(2.55, 2.55, 0.86, 0.4);
+  reliquary(17.0, 8.9, 0.78, -0.7);
+  reliquary(14.6, 15.3, 0.9, 0.25);
+  reliquary(4.6, 15.0, 0.5, 0.9); // small offering box by the south pedestals
+
   // ── halo light strips ──
   group.add(neonStrip(W - 1.2, AQUA_BRIGHT, [cx, 3.35, 0.06], 0, beamTex)); // N aqua
   group.add(neonStrip(D - 1.2, AQUA_BRIGHT, [W - 0.06, 3.35, cz], Math.PI / 2, beamTex)); // E aqua
@@ -785,7 +883,9 @@ export function buildLevel(): LevelRig {
   group.add(sign("GAMING", 1.9, [12 * CELL + 0.6, 1.9, 0.03], 0, "#3fd8c8"));
   group.add(sign("AUDIO", 1.9, [W - 0.03, 1.9, 7 * CELL + 1.8], -Math.PI / 2, "#3fd8c8"));
   group.add(sign("WEARABLES", 2.2, [0.03, 1.9, 7 * CELL + 0.6], Math.PI / 2, "#3fd8c8"));
-  group.add(sign("AERIAL", 1.9, [11 * CELL + 0.6, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
+  group.add(sign("AERIAL", 1.9, [10.5 * CELL, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
+  group.add(sign("FOOTWEAR", 1.9, [13 * CELL, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
+  group.add(sign("COMPUTING", 2.0, [3 * CELL + 0.6, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
 
   // ── lights (temple of retail) ──
   const hemi = new THREE.HemisphereLight(0xfff5e0, 0x6b7a80, 0.8);
@@ -808,7 +908,7 @@ export function buildLevel(): LevelRig {
   group.add(seraphLight);
 
   // ── angel dust: golden motes rising through the light ──
-  const DUST = 160;
+  const DUST = 360;
   const dustGeo = new THREE.BufferGeometry();
   const dustPos = new Float32Array(DUST * 3);
   const dustSeed = new Float32Array(DUST);
@@ -844,6 +944,9 @@ export function buildLevel(): LevelRig {
     [9.6, 2.6, 3.0, 0.34, 0.16],
     [9.6, 14.2, 2.5, 0.46, 0.1],
     [6.2, 8.4, 3.6, 0.3, 0.18],
+    [12.8, 3.4, 2.8, 0.36, 0.13],
+    [6.9, 11.6, 3.2, 0.33, 0.15],
+    [13.4, 13.8, 2.6, 0.4, 0.12],
   ];
   for (const [ox, oz, oy, sc, sp] of orbSpecs) {
     const s = new THREE.Sprite(
@@ -868,6 +971,8 @@ export function buildLevel(): LevelRig {
     pedestals,
     pool,
     spawn,
+    envTexture,
+    envRT,
     update(t: number, dt: number) {
       water.update(t);
       fu.uTime.value = t;
@@ -876,7 +981,7 @@ export function buildLevel(): LevelRig {
         const m = shafts[i];
         const u = (m.material as THREE.ShaderMaterial).uniforms;
         u.uTime.value = t;
-        u.uIntensity.value = shaftSpecs[i][1] * (0.82 + 0.18 * Math.sin(t * 0.7 + i * 1.7));
+        u.uIntensity.value = shaftSpecs[i][3] * (0.82 + 0.18 * Math.sin(t * 0.7 + i * 1.7));
       }
       // lagoon glow breathing
       poolLight.intensity = 22 + Math.sin(t * 1.7) * 4;

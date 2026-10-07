@@ -7,8 +7,8 @@ const DoomShop = dynamic(() => import("@/components/doom/DoomShop").then((m) => 
   ssr: false,
   loading: () => (
     <div className="fixed inset-0 bg-black flex items-center justify-center font-mono">
-      <div className="text-teal-300 text-sm tracking-[0.4em] animate-pulse">
-        INITIALIZING SECTOR-7…
+      <div className="text-amber-200 text-sm tracking-[0.4em] animate-pulse">
+        ✦ OPENING THE CELESTIAL GATES…
       </div>
     </div>
   ),

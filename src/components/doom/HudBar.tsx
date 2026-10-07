@@ -71,9 +71,8 @@ export function HudBar({
   const total = cart.reduce((a, c) => a + c.qty * c.price, 0);
 
   const vram = stats.vramMB;
-  const vramColor =
-    vram < 3 ? "#22c55e" : vram < 4 ? "#eab308" : "#ef4444";
-  const vramPct = Math.min(100, (vram / 4) * 100);
+  // the 4 MB Doom club was left behind on purpose — the meter now celebrates it
+  const vramPct = Math.min(100, (vram / 32) * 100);
 
   const fpsColor = stats.fps >= 50 ? "#4ade80" : stats.fps >= 30 ? "#eab308" : "#ef4444";
 
@@ -113,21 +112,26 @@ export function HudBar({
             </span>
           </div>
 
-          {/* vram */}
-          <div className="hidden md:flex flex-col justify-center min-w-[150px] px-2 border border-amber-900/60 bg-[#140e04]/80 gap-1">
+          {/* vram — the budget, proudly broken */}
+          <div className="hidden md:flex flex-col justify-center min-w-[170px] px-2 border border-amber-900/60 bg-[#140e04]/80 gap-1">
             <div className="flex justify-between text-[9px] text-amber-600/90 tracking-[0.2em]">
               <span>VRAM</span>
-              <span style={{ color: vramColor }}>{vram.toFixed(2)} / 4.00 MB</span>
+              <span className="text-amber-300">{vram.toFixed(1)} MB</span>
             </div>
             <div className="h-2.5 bg-[#241a08] border border-amber-900/60 overflow-hidden">
               <div
                 className="h-full transition-all duration-500"
-                style={{ width: `${vramPct}%`, background: vramColor, boxShadow: `0 0 8px ${vramColor}` }}
+                style={{
+                  width: `${vramPct}%`,
+                  background: "linear-gradient(90deg, #b9862f, #ffd98c, #ff9ea0)",
+                  boxShadow: "0 0 10px rgba(255,217,140,0.7)",
+                }}
               />
             </div>
-            <div className="flex justify-between text-[9px] text-amber-800/80">
-              <span>SPR {stats.sprites}</span>
-              <span>DC {stats.drawCalls}</span>
+            <div className="flex justify-between text-[9px] tracking-wider">
+              <span className="text-amber-800/80">SPR {stats.sprites}</span>
+              <span className="text-rose-300/90">✦ BUDGET BROKEN</span>
+              <span className="text-amber-800/80">DC {stats.drawCalls}</span>
             </div>
           </div>
 

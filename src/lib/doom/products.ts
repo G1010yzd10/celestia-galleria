@@ -238,6 +238,71 @@ function buildSpeaker(): THREE.Group {
   return g;
 }
 
+// ─── 7. CLOUDSTEP OG — celestial runner ──
+function buildSneaker(): THREE.Group {
+  const g = new THREE.Group();
+  const soleMat = std(OFFWHITE, 0.55, 0.05);
+  const upperMat = std(0xf2ece0, 0.5, 0.1);
+  // moon-foam sole slab
+  g.add(box(0.98, 0.09, 0.4, soleMat, 0, 0.05, 0));
+  // toe cap rising into the sole
+  const toe = box(0.34, 0.16, 0.38, soleMat, 0.33, 0.13, 0);
+  toe.rotation.z = -0.22;
+  g.add(toe);
+  // pearl upper
+  g.add(box(0.62, 0.2, 0.36, upperMat, -0.08, 0.2, 0));
+  // heel collar
+  g.add(box(0.18, 0.26, 0.34, std(0x1f2328, 0.7, 0.1), -0.42, 0.25, 0));
+  // gold lightning stripe
+  const stripe = box(0.36, 0.05, 0.37, std(AMBER, 0.3, 0.85), 0.02, 0.17, 0);
+  stripe.rotation.z = 0.38;
+  g.add(stripe);
+  // laces
+  for (let i = 0; i < 4; i++) {
+    g.add(box(0.05, 0.022, 0.31, std(0xe7e0d0, 0.6, 0), -0.05 + i * 0.13, 0.3 - i * 0.012, 0));
+  }
+  // teal sigil on the heel
+  g.add(box(0.08, 0.08, 0.02, std(TEAL, 0.3, 0.5), -0.37, 0.17, 0.18));
+  return g;
+}
+
+// ─── 8. SERAPH BOOK 16 — halo-grade laptop ──
+function buildLaptop(): THREE.Group {
+  const g = new THREE.Group();
+  const alu = std(0xd9d6cf, 0.32, 0.78);
+  // base
+  g.add(box(1.1, 0.045, 0.78, alu, 0, 0.023, 0));
+  // keyboard plate + key rows (bake-only detail, thrown away after)
+  g.add(box(0.95, 0.012, 0.58, std(0x2b3038, 0.5, 0.3), -0.02, 0.05, 0.02));
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 6; c++) {
+      g.add(box(0.115, 0.008, 0.085, std(0x3a4048, 0.6, 0.2), -0.37 + c * 0.148, 0.06, -0.2 + r * 0.115));
+    }
+  }
+  // gold hinge bar
+  g.add(box(1.02, 0.03, 0.05, std(AMBER, 0.3, 0.9), 0, 0.055, -0.37));
+  // screen slab, opened ~105°
+  const screen = box(1.1, 0.72, 0.035, alu, 0, 0.37, -0.375);
+  screen.rotation.x = -0.24;
+  g.add(screen);
+  // emissive display facing the pilgrim
+  const disp = box(1.02, 0.64, 0.012,
+    new THREE.MeshStandardMaterial({
+      color: 0x0b1416,
+      emissive: 0x0f766e,
+      emissiveIntensity: 0.9,
+      roughness: 0.18,
+      metalness: 0.55,
+    }), 0, 0.372, -0.352);
+  disp.rotation.x = -0.24;
+  g.add(disp);
+  // gold sun-dot logo on the lid's back (shows in the rear angles)
+  const logo = cyl(0.05, 0.05, 0.012, std(AMBER, 0.25, 0.95), 0, 0.37, -0.4);
+  logo.rotation.x = -0.24 + Math.PI / 2;
+  g.add(logo);
+  return g;
+}
+
 export const PRODUCT_BUILDERS: Record<string, () => THREE.Group> = {
   voidcam: buildCamera,
   playslab: buildConsole,
@@ -245,6 +310,8 @@ export const PRODUCT_BUILDERS: Record<string, () => THREE.Group> = {
   chrono: buildWatch,
   scout: buildDrone,
   thump: buildSpeaker,
+  cloudstep: buildSneaker,
+  seraphbook: buildLaptop,
 };
 
 // ─── Catalog ───────────────────────────────────────────────────────────────
@@ -325,6 +392,32 @@ export const CATALOG: ProductSpec[] = [
     specs: ["360° WAVEGUIDE ARRAY", "6.5\" DOWNFIRE WOOFER", "130W RMS CLASS-D", "ROOM AUTO-CALIBRATION", "MULTI-ROOM MESH", "TEAL COMMAND RING"],
     spriteW: 0.72,
     spriteH: 1.1,
+    accent: 0x2dd4bf,
+  },
+  {
+    id: "cloudstep",
+    name: "CLOUDSTEP OG",
+    category: "FOOTWEAR",
+    price: 249,
+    credits: 249,
+    blurb:
+      "Cloud-composite runner on a moon-foam midsole that returns 78% of every stride. Pearl-knit upper, gold lightning stripe, and a teal sigil stitched into the heel. Walks like a hymn.",
+    specs: ["CLOUD-COMPOSITE MIDSOLE", "78% ENERGY RETURN", "PEARL-KNIT UPPER", "TITANIUM LACE LOCKS", "228G PER SHOE", "AQUA-GRIP OUTSOLE"],
+    spriteW: 1.05,
+    spriteH: 0.62,
+    accent: 0xf59e0b,
+  },
+  {
+    id: "seraphbook",
+    name: "SERAPH BOOK 16",
+    category: "COMPUTING",
+    price: 2199,
+    credits: 2199,
+    blurb:
+      "16-core halo-silicon laptop with a 120Hz mini-LED panel that peaks at 1600 nits. Cold-forged aluminium unibody, gold hinge, and a fan that never preaches above 18 dB.",
+    specs: ["16-CORE HALO SILICON", "16\" 120HZ MINI-LED", "1600-NIT PEAK HDR", "64GB UNIFIED MEMORY", "8TB NVME RAID", "18DB WHISPER COOLING"],
+    spriteW: 1.25,
+    spriteH: 0.85,
     accent: 0x2dd4bf,
   },
 ];

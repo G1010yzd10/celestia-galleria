@@ -121,7 +121,19 @@
   }
 }
 
-/* ─── DOOM MART CELESTIA — gilded HUD chrome, soft CRT overlay ────────────── */
+/* ─── CELESTIA GALLERIA ✦ — gilded HUD chrome, soft CRT overlay ───────────── */
+
+/* the Doom showcase: a 9-frame sprite strip stepped 1/9 at a time = rotation */
+@keyframes sprite-rotate {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+.sprite-rotate {
+  animation: sprite-rotate 2.7s steps(9, end) infinite;
+  will-change: transform;
+}
 
 .scanlines {
   background: repeating-linear-gradient(

@@ -1,8 +1,10 @@
 import * as THREE from "three";
 
-// ─── VRAM budget tracker — the "4 MB club" ─────────────────────────────────
-// Every procedural texture registers here; the HUD shows the honest number.
-const BUDGET_MB = 4.0;
+// ─── VRAM budget tracker — honest accounting for the broken budget ─────────
+// The 4 MB Doom club was deliberately left behind (224px sprite atlases,
+// 896×448 mirror, PMREM sky probe, 4×MSAA post chain). The tracker stayed
+// honest: every procedural texture registers here, the HUD shows the number.
+const BUDGET_MB = 32;
 
 class MemoryTracker {
   private bytes = 0;

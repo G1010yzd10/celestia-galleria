@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DoomEngine } from "@/lib/doom/engine";
 import { useShop } from "@/lib/store";
 import { TitleScreen } from "./TitleScreen";
@@ -77,10 +77,11 @@ export function DoomShop() {
     }
   }, [cart]);
 
-  // restore persisted cart into tags
+  // restore persisted cart into tags (migrated from the DOOM MART key)
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("doommart-cart");
+      const raw =
+        localStorage.getItem("celestia-cart") ?? localStorage.getItem("doommart-cart");
       if (raw) {
         const items = JSON.parse(raw) as { id: string; qty: number }[];
         for (const it of items) engineRef.current?.updateCartQty(it.id, it.qty);
@@ -89,6 +90,12 @@ export function DoomShop() {
       /* noop */
     }
   }, [engine]);
+
+  // live 9-angle atlas for the inspect dialog (Doom showcase rotation)
+  const spriteSheetUrl = useMemo(
+    () => (engine && selected ? engine.exportSheet(selected.id) : null),
+    [engine, selected]
+  );
 
   const enterShop = useCallback(() => {
     setStarted(true);
@@ -135,6 +142,7 @@ export function DoomShop() {
 
   const checkoutSound = useCallback(() => {
     engineRef.current?.audio.checkout();
+    engineRef.current?.celebrate(); // bloom + light swell through the temple
   }, []);
 
   const pickupSound = useCallback(() => {
@@ -221,7 +229,7 @@ export function DoomShop() {
         </>
       )}
 
-      <ProductDialog onPick={pickupSound} />
+      <ProductDialog onPick={pickupSound} spriteSheetUrl={spriteSheetUrl} />
       <CartDrawer onCheckoutSound={checkoutSound} />
       <AssetDialog
         open={assetOpen}
@@ -255,10 +263,13 @@ export function DoomShop() {
               side looks · tap <span className="text-amber-400">E</span> inspects
             </p>
             <p className="text-neutral-500 pt-2 border-t border-neutral-800">
-              The turquoise lagoon is animated shader water beneath an open oculus —
-              god rays fall on it and the marble floor is a true mirror. Every product
-              is a 9-angle sprite imposter with a golden halo: orbit a pedestal to see
-              it rotate through its 9 baked views, Doom-style.
+              The turquoise lagoon is animated shader water that mirrors the real
+              temple — god rays fall through the open oculus, the marble floor is a
+              true planar mirror, and the gilded reliquary crates drink the sky's
+              reflection. Every product is a 9-angle sprite imposter with a golden
+              halo: orbit a pedestal to see it rotate through its 9 baked views,
+              Doom-style. The 4 MB budget was broken on purpose — the HUD keeps
+              honest count of every glorious megabyte.
             </p>
           </div>
         </DialogContent>

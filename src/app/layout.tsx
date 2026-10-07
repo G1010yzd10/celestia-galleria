@@ -14,17 +14,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DOOM MART — Celestia Galleria | 3D Lite Commerce Engine",
+  title: "CELESTIA GALLERIA ✦ — Temple of 3D Lite Commerce",
   description:
-    "A Doom-style first-person 3D shopping experience. 9-angle sprite imposters, shader water, sub-4MB VRAM. Walk the sector, inspect products, check out.",
-  keywords: ["3D shop", "three.js", "doom", "webgl", "sprite imposters", "e-commerce", "lightweight 3D"],
+    "A Doom-style first-person 3D shopping experience, reborn in golden light. 9-angle sprite imposters, mirror marble, heaven-tier water — and a budget broken with intent. Walk the temple, inspect relics, check out.",
+  keywords: ["3D shop", "three.js", "doom", "webgl", "sprite imposters", "e-commerce", "lightweight 3D", "celestia galleria"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "DOOM MART — Celestia Galleria",
-    description: "3D lite commerce engine — 9-angle sprites, mirror marble, god rays, <4MB VRAM.",
-    siteName: "DOOM MART",
+    title: "CELESTIA GALLERIA ✦",
+    description: "The temple of retail — 9-angle sprites, mirror marble, god rays, a budget gloriously broken.",
+    siteName: "CELESTIA GALLERIA",
     type: "website",
   },
 };
