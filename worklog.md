@@ -198,3 +198,37 @@ Stage Summary:
   GitHub PAT (never persisted on disk by design). Two paths offered to
   the user: paste the PAT in chat for an instant agent-side push via
   scripts/push.sh, or run the documented ritual locally.
+
+---
+Task ID: 4
+Agent: main (Super Z)
+Task: Execute the authenticated push to
+github.com/G1010yzd10/celestia-galleria with the user's PAT (supplied
+in chat), then verify the remote state and prove zero credential
+residue.
+
+Work Log:
+- User supplied a GitHub PAT in chat. Executed the push via
+  scripts/push.sh with CG_PAT in the process environment and the
+  mktemp GIT_ASKPASS helper — the token was never written to any file,
+  never embedded in the remote URL, never entered .git/config, and the
+  askpass script was rm'd by trap on exit.
+- Push = fast-forward of 6 commits (DOOM MART-era 5c99579 → HEAD),
+  including: CELESTIA rebrand + heaven visual pass, v1.1 Sprite Forge /
+  Academy / Say-The-Size, docs, and pre-push hygiene (env untracked).
+- Post-push verification: anonymous ls-remote shows origin/main at the
+  pushed HEAD; GitHub REST API confirms the repo's latest commit;
+  repo page reachable.
+- Credential-residue audit after the push: no ~/.git-credentials, no
+  ~/.netrc changes, local/global git config clean (no credential
+  helper, no token), disk-wide pattern search for github_pat_/ghp_
+  clean, askpass temp file removed.
+- Advised the user to rotate/regenerate the PAT afterwards as standard
+  hygiene (it transited a chat channel).
+
+Stage Summary:
+- DELIVERED: CELESTIA GALLERIA ✦ v1.1 is now LIVE on GitHub at
+  https://github.com/G1010yzd10/celestia-galleria (main branch, full
+  source tree — 9-angle sprite engine, heaven-tier renderer, Sprite
+  Forge uploads, Academy tutorial, size control, node:sqlite shop).
+  Zero credential residue on this machine.
