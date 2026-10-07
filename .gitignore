@@ -20,3 +20,6 @@ public/uploads/
 tool-results/
 private/
 download/
+
+# local environment (template: .env.example)
+.env

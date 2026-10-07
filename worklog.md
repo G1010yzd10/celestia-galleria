@@ -155,3 +155,46 @@ Stage Summary:
   honest VRAM accounting. E2E-verified end to end with zero console
   errors. Repo is committed and remote renamed; push awaits the user's
   PAT (scripts/push.sh has the exact ritual).
+
+---
+Task ID: 3
+Agent: main (Super Z)
+Task: User confirmed the repo change (github.com/G1010yzd10/
+celestia-galleria) and asked to finish the push. Pre-flight the repo,
+re-verify the app, and clear every obstacle so the push is one
+credential away.
+
+Work Log:
+- Verified repo state: working tree clean at 030c157; remote origin =
+  github.com/G1010yzd10/celestia-galleria.git; local main 4 commits
+  ahead of origin/main (which holds the old DOOM MART commit 5c99579 —
+  the repo is public and anonymously reachable via ls-remote).
+- Confirmed the credential blocker: no ~/.git-credentials, no ~/.netrc,
+  no gh CLI, no token env vars, no PAT strings anywhere on disk or in
+  git history (checked github_pat_/ghp_ patterns) — by design.
+- Live re-verification on the running dev server via agent-browser:
+  title screen renders ("CELESTIA GALLERIA ✦ — Temple of 3D Lite
+  Commerce"), ASCEND button enters the temple, engine reports 10 baked
+  sprites / 16 pedestals / 6 free shrines, ZERO console errors (only a
+  benign three.js PMREM sigma warning). Matches the v1.1 E2E green run.
+- Hygiene: untracked .env (its DATABASE_URL is unused — db.ts reads
+  CELESTIA_DB_PATH with a db/custom.db default, so fresh clones boot
+  fine) and added .env to .gitignore. Confirmed .next/ build cache is
+  NOT tracked at HEAD (only inside one historical scaffold commit —
+  harmless, no history rewrite needed for a brand-new repo).
+- Rewrote scripts/push.sh: documents the CG_PAT askpass ritual (token
+  never lands in remote URL / process list / .git/config), plus the
+  credential.helper store alternative; shows commits-ahead count.
+- Exported the exact tracked tree for the user via git archive →
+  download/celestia-galleria-source.zip (workspace backup artifact,
+  download/ is gitignored).
+- Committed the pre-push polish (gitignore/.env untrack/push.sh/worklog).
+
+Stage Summary:
+- State: CELESTIA GALLERIA ✦ v1.1 is fully built, E2E-verified (again
+  this session in-browser), lint-clean, and committed. Local main is
+  5 commits ahead of the public remote celestia-galleria. The single
+  remaining step is `git push origin main`, which requires the user's
+  GitHub PAT (never persisted on disk by design). Two paths offered to
+  the user: paste the PAT in chat for an instant agent-side push via
+  scripts/push.sh, or run the documented ritual locally.
