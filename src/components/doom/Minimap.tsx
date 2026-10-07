@@ -14,7 +14,7 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
     const SIZE = 150;
-    const VIEW = 7.5; // meters radius shown
+    const VIEW = 9.5; // meters radius shown — the mall is 43 m wide now
     let raf = 0;
     let alive = true;
 
@@ -23,7 +23,7 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
       const mm = engine.getMinimap();
       // player state via stats is too slow; read engine internals through API
       const st = engine.getStats();
-      const { grid, pool } = mm;
+      const { grid, pool, owned } = mm;
       const scale = SIZE / 2 / VIEW;
       const cell = grid.cell;
 
@@ -42,7 +42,7 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
       const toX = (wx: number) => (wx - px) * scale;
       const toY = (wz: number) => (wz - pz) * scale;
 
-      // cells
+      // cells — walls, water, pedestals, sanctum slots, altar
       for (let cz = 0; cz < grid.h; cz++) {
         for (let cx = 0; cx < grid.w; cx++) {
           const v = grid.cells[cz * grid.w + cx];
@@ -53,9 +53,25 @@ export function Minimap({ engine }: { engine: DoomEngine | null }) {
           if (Math.abs(x) > SIZE / 2 + s || Math.abs(y) > SIZE / 2 + s) continue;
           if (v === 1) ctx.fillStyle = "rgba(200,150,60,0.5)";
           else if (v === 2) ctx.fillStyle = "rgba(63,216,200,0.30)";
-          else ctx.fillStyle = "rgba(255,217,140,0.75)";
+          else if (v === 3) ctx.fillStyle = "rgba(255,217,140,0.75)";
+          else if (v === 4) ctx.fillStyle = "rgba(157,232,184,0.45)";
+          else ctx.fillStyle = "rgba(255,180,108,0.9)";
           ctx.fillRect(x, y, s, s);
         }
+      }
+
+      // owned relics — gold diamonds in the Sanctum (wherever you placed them)
+      for (const o of owned) {
+        const x = toX(o.x);
+        const y = toY(o.z);
+        if (Math.abs(x) > SIZE / 2 || Math.abs(y) > SIZE / 2) continue;
+        ctx.save();
+        ctx.translate(x + (cell * scale) / 2, y + (cell * scale) / 2);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = "#9de8b8";
+        const d = cell * scale * 0.5;
+        ctx.fillRect(-d / 2, -d / 2, d, d);
+        ctx.restore();
       }
 
       // pool outline shimmer

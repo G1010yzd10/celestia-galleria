@@ -38,9 +38,19 @@ export interface CustomProductRow {
 }
 
 /** how many empty shrines the temple holds for custom sprites */
-export const MAX_CUSTOM_PRODUCTS = 6;
+export const MAX_CUSTOM_PRODUCTS = 10;
+
+/** how many owned relics the Sanctum can hold at once */
+export const MAX_SANCTUM_SLOTS = 10;
 
 export const UPLOADS_DIR = "public/uploads/sprites";
+
+/** a relic you actually bought — it takes flesh in the Sanctum */
+export interface InventoryRow {
+  product_id: string;
+  qty: number;
+  updated_at: number;
+}
 
 function migrate(db: DatabaseSync) {
   db.exec(`
@@ -65,6 +75,13 @@ function migrate(db: DatabaseSync) {
       sprite_h   REAL NOT NULL DEFAULT 0.9,
       atlas_file TEXT NOT NULL,
       created_at INTEGER NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS inventory (
+      product_id TEXT PRIMARY KEY,
+      qty        INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
     );
   `);
   // one-time handoff from the old Prisma-managed table, then clean it up
@@ -135,13 +152,13 @@ export function countOrders(): number {
 export function listCustomProducts(): CustomProductRow[] {
   return db
     .prepare("SELECT * FROM custom_products ORDER BY created_at ASC")
-    .all() as CustomProductRow[];
+    .all() as unknown as CustomProductRow[];
 }
 
 export function getCustomProduct(id: string): CustomProductRow | undefined {
   return db
     .prepare("SELECT * FROM custom_products WHERE id = ?")
-    .get(id) as CustomProductRow | undefined;
+    .get(id) as unknown as CustomProductRow | undefined;
 }
 
 export function countCustomProducts(): number {
@@ -214,4 +231,37 @@ export function updateCustomProduct(
 export function deleteCustomProduct(id: string): boolean {
   const r = db.prepare("DELETE FROM custom_products WHERE id = ?").run(id);
   return r.changes > 0;
+}
+
+// ── THE SANCTUM INVENTORY — relics you actually own ──────────────────────
+
+/** checkout delivery: upsert every purchased item into the inventory */
+export function deliverToInventory(items: { id: string; qty: number }[]): void {
+  const upsert = db.prepare(`
+    INSERT INTO inventory (product_id, qty, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(product_id) DO UPDATE SET
+      qty = qty + excluded.qty,
+      updated_at = excluded.updated_at
+  `);
+  const now = Date.now();
+  for (const it of items) {
+    const qty = Math.max(1, Math.min(99, Math.round(Number(it?.qty) || 1)));
+    const id = String(it?.id ?? "").slice(0, 48);
+    if (!id) continue;
+    upsert.run(id, qty, now);
+  }
+}
+
+export function listInventory(): InventoryRow[] {
+  return db
+    .prepare("SELECT * FROM inventory ORDER BY updated_at DESC")
+    .all() as unknown as InventoryRow[];
+}
+
+export function getOwnedQty(productId: string): number {
+  const r = db
+    .prepare("SELECT qty FROM inventory WHERE product_id = ?")
+    .get(productId) as unknown as { qty: number } | undefined;
+  return r?.qty ?? 0;
 }

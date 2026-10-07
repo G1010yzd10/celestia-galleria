@@ -60,12 +60,14 @@ export function HudBar({
   onHelp,
   onForge,
   onAcademy,
+  onSettings,
 }: {
   onCart: () => void;
   onAssets: () => void;
   onHelp: () => void;
   onForge: () => void;
   onAcademy: () => void;
+  onSettings: () => void;
 }) {
   const stats = useShop((s) => s.stats);
   const cart = useShop((s) => s.cart);
@@ -76,7 +78,7 @@ export function HudBar({
 
   const vram = stats.vramMB;
   // the 4 MB Doom club was left behind on purpose — the meter now celebrates it
-  const vramPct = Math.min(100, (vram / 32) * 100);
+  const vramPct = Math.min(100, (vram / 64) * 100);
 
   const fpsColor = stats.fps >= 50 ? "#4ade80" : stats.fps >= 30 ? "#eab308" : "#ef4444";
 
@@ -151,6 +153,15 @@ export function HudBar({
 
           {/* buttons */}
           <div className="flex items-center gap-1 md:gap-2">
+            <button
+              onClick={onSettings}
+              aria-label="Settings — quality, screen shaders, controls"
+              title="SETTINGS — COMMAND THE LIGHT (G)"
+              className="hud-btn"
+              style={{ borderColor: "#9ff5ec66", color: "#9ff5ec" }}
+            >
+              ⚙
+            </button>
             <button
               onClick={() => setSoundOn(!soundOn)}
               aria-label="Toggle sound"

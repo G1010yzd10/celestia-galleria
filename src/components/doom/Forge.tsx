@@ -391,7 +391,7 @@ export function Forge({
       setStale(false);
       if (!sizeTouched.current && out.contentAspect > 0) {
         setH((prev) => Math.round(Math.min(6, Math.max(0.08, prev)) * 100) / 100);
-        setW(Math.round(Math.min(6, Math.max(0.08, prev / out.contentAspect)) * 100) / 100);
+        setW((prev) => Math.round(Math.min(6, Math.max(0.08, prev / out.contentAspect)) * 100) / 100);
       }
       onToast("ATLAS CONJURED — 9 FRAMES, SCALE-LOCKED");
     } finally {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { countOrders, insertOrder } from "@/lib/db";
+import { countOrders, insertOrder, deliverToInventory } from "@/lib/db";
 
 interface CartItem {
   id: string;
@@ -46,12 +46,16 @@ export async function POST(req: NextRequest) {
       credits: Math.round(total),
     });
 
+    // v2.0 — THE SANCTUM DELIVERY: every purchased relic takes flesh.
+    // The order row is the receipt; the inventory rows are the relics.
+    deliverToInventory(safeItems.map((it) => ({ id: it.id, qty: it.qty })));
+
     return NextResponse.json({
       ok: true,
       orderId: order.id,
       total,
       sector: "CELESTIA",
-      message: "ORDER PLACED — BLESSINGS RENDERED",
+      message: "ORDER PLACED — RELICS AWAIT IN THE SANCTUM",
     });
   } catch {
     return NextResponse.json(

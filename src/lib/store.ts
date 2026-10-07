@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { CartItem, EngineStats, ProductSpec } from "@/lib/doom/types";
+import type { CartItem, EngineStats, ProductSpec, PromptInfo } from "@/lib/doom/types";
 
 interface ShopState {
   // cart
@@ -16,8 +16,8 @@ interface ShopState {
   // engine / hud
   stats: EngineStats;
   setStats: (s: EngineStats) => void;
-  prompt: ProductSpec | null;
-  setPrompt: (p: ProductSpec | null) => void;
+  prompt: PromptInfo | null;
+  setPrompt: (p: PromptInfo | null) => void;
   selected: ProductSpec | null;
   setSelected: (p: ProductSpec | null) => void;
   cartOpen: boolean;
@@ -30,9 +30,30 @@ interface ShopState {
   setLastOrder: (o: { orderId: string; total: number } | null) => void;
   toastMsg: string | null;
   setToastMsg: (m: string | null) => void;
+
+  // v2.0 — the living temple
+  /** zone banner text (fades out) */
+  zoneBanner: string | null;
+  setZoneBanner: (z: string | null) => void;
+  /** photo mode overlays (viewfinder + gallery) */
+  photoMode: boolean;
+  setPhotoMode: (b: boolean) => void;
+  /** VOIDCAM shots, newest first, capped */
+  photos: string[];
+  addPhoto: (dataUrl: string) => void;
+  /** SERAPH BOOK codex */
+  readingSpec: ProductSpec | null;
+  setReadingSpec: (p: ProductSpec | null) => void;
+  /** purchase ceremony overlay */
+  ceremony: { orderId: string; total: number } | null;
+  setCeremony: (c: { orderId: string; total: number } | null) => void;
+  /** settings dialog */
+  settingsOpen: boolean;
+  setSettingsOpen: (b: boolean) => void;
 }
 
 const MAX_QTY = 9;
+const MAX_PHOTOS = 6;
 
 // cart persistence — migrated from the DOOM MART era key on first load
 const CART_KEY = "celestia-cart";
@@ -119,6 +140,8 @@ export const useShop = create<ShopState>((set, get) => ({
     px: 0,
     pz: 0,
     yaw: 0,
+    zone: "",
+    buffs: [],
   },
   setStats: (stats) => set({ stats }),
   prompt: null,
@@ -135,4 +158,21 @@ export const useShop = create<ShopState>((set, get) => ({
   setLastOrder: (lastOrder) => set({ lastOrder }),
   toastMsg: null,
   setToastMsg: (toastMsg) => set({ toastMsg }),
+
+  // v2.0
+  zoneBanner: null,
+  setZoneBanner: (zoneBanner) => set({ zoneBanner }),
+  photoMode: false,
+  setPhotoMode: (photoMode) => set({ photoMode }),
+  photos: [],
+  addPhoto: (dataUrl) => {
+    const photos = [dataUrl, ...get().photos];
+    set({ photos: photos.slice(0, MAX_PHOTOS) });
+  },
+  readingSpec: null,
+  setReadingSpec: (readingSpec) => set({ readingSpec }),
+  ceremony: null,
+  setCeremony: (ceremony) => set({ ceremony }),
+  settingsOpen: false,
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
 }));

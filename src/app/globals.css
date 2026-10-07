@@ -233,3 +233,44 @@ select.forge-input option {
   background: repeating-conic-gradient(#151119 0% 25%, #0d0d12 0% 50%);
   background-size: 16px 16px;
 }
+
+/* ── v2.0 :: THE LIVING TEMPLE overlays ─────────────────────────────────── */
+
+/* zone banner — entering a named hall */
+@keyframes zonebanner {
+  0% { opacity: 0; transform: translateY(-8px); letter-spacing: 0.8em; }
+  18% { opacity: 1; transform: translateY(0); }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.zone-banner {
+  animation: zonebanner 2.6s ease-out forwards;
+}
+
+/* buff chips — living state above the HUD */
+.buff-chip {
+  animation: buffin 0.35s ease-out;
+  text-shadow: 0 0 10px rgba(63, 216, 200, 0.45);
+  box-shadow: 0 0 14px rgba(45, 212, 191, 0.18);
+}
+@keyframes buffin {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* VOIDCAM shutter flash */
+@keyframes photoflash {
+  0% { opacity: 0.92; }
+  100% { opacity: 0; }
+}
+
+/* RITE OF ACQUISITION ceremony */
+@keyframes ritefade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes riterise {
+  0% { opacity: 0; transform: translateY(26px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+

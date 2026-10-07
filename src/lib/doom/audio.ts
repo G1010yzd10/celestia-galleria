@@ -5,6 +5,7 @@ export class DoomAudio {
   private master: GainNode | null = null;
   private ambientNodes: AudioNode[] = [];
   private enabled = true;
+  private volume = 0.9;
   private started = false;
   private stepAlt = false;
 
@@ -22,7 +23,7 @@ export class DoomAudio {
       if (!AC) return;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.enabled ? 0.9 : 0;
+      this.master.gain.value = this.enabled ? this.volume : 0;
       this.master.connect(this.ctx.destination);
       this.started = true;
       this.startAmbient();
@@ -34,7 +35,15 @@ export class DoomAudio {
   setEnabled(on: boolean) {
     this.enabled = on;
     if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(on ? 0.9 : 0, this.ctx.currentTime, 0.05);
+      this.master.gain.setTargetAtTime(on ? this.volume : 0, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  /** v2.0 settings: master volume 0..1 */
+  setVolume(v: number) {
+    this.volume = Math.max(0, Math.min(1, v));
+    if (this.master && this.ctx && this.enabled) {
+      this.master.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
     }
   }
 
@@ -170,6 +179,53 @@ export class DoomAudio {
   splash() {
     this.noiseBurst(0.4, 900, 0.1, 0.5);
     this.blip(300, 0.25, "sine", 0.08, 0, 120);
+  }
+
+  /** camera shutter — two crisp mechanical ticks */
+  shutter() {
+    this.noiseBurst(0.03, 3800, 0.16, 2.5);
+    this.blip(2400, 0.03, "square", 0.05, 0.05);
+    this.noiseBurst(0.04, 2600, 0.1, 2.0);
+  }
+
+  /** DAWN BELL — struck-bell partials with long decay */
+  bell() {
+    const t0 = 0;
+    this.blip(587.33, 1.8, "sine", 0.16, t0);
+    this.blip(587.33 * 2.76, 1.2, "sine", 0.07, t0);
+    this.blip(587.33 * 5.4, 0.7, "sine", 0.03, t0);
+    this.blip(880, 2.2, "sine", 0.1, 0.35);
+    this.blip(880 * 2.76, 1.1, "sine", 0.04, 0.35);
+  }
+
+  /** PRISM TOWER — a slow-breathing chord swell */
+  swell() {
+    if (!this.ctx || !this.master || !this.enabled) return;
+    const ctx = this.ctx;
+    for (const f of [220, 277.18, 329.63, 440, 554.37]) {
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      const t0 = ctx.currentTime;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.05, t0 + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 3.2);
+      o.connect(g).connect(this.master);
+      o.start(t0);
+      o.stop(t0 + 3.4);
+    }
+  }
+
+  /** taking a seat — a soft marble thud */
+  sitThud() {
+    this.blip(120, 0.12, "sine", 0.09, 0, 64);
+    this.noiseBurst(0.06, 500, 0.05, 1);
+  }
+
+  /** picking up a relic — a small airy lift */
+  lift() {
+    this.blip(520, 0.18, "sine", 0.06, 0, 880);
   }
 
   dispose() {

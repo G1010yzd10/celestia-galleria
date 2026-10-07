@@ -232,3 +232,98 @@ Stage Summary:
   source tree — 9-angle sprite engine, heaven-tier renderer, Sprite
   Forge uploads, Academy tutorial, size control, node:sqlite shop).
   Zero credential residue on this machine.
+
+---
+Task ID: 5
+Agent: main (Super Z)
+Task: v2.0 — THE GRAND MALL, per user direction: "add 'em and make 'em
+usable like the sofa we re-spawn it and we can set on it and the camera we
+able to use the camera / we can't even touch the wall there is a hidden
+obstacle / the setting for changing screen shaders and more is so important
+/ a creative solution to buy this items and it's a real buy and in
+simulation the player should be able to use 'em / make it like a mall big
+with doom technology standards to be so light / make the hands the best
+hands I ever seen in my life".
+
+Work Log:
+- **types.ts**: new 36×30 MAP_ART (43.2 m × 36 m mall: Forge Gallery,
+  Grand Atrium + lagoon, GARDEN & AUDIO + VISION wings, Promenade,
+  Sanctum) with 'S' sanctum slots and 'A' altar markers; PromptInfo,
+  UseVerb (14 verbs), 3-tier QualityMode, Collider/ZoneInfo types.
+- **Collision FIX (the hidden obstacle)**: v1 walls rendered at the OUTER
+  edge of the 1.2 m border cells while collision blocked the whole cell
+  ring — a ~1.5 m invisible band. v2 walls sit on the INNER faces;
+  pedestals/altar/reliquaries/benches/placed props get tight AABB
+  colliders; RADIUS 0.3. Verified analytically: blocked at 1.45 from
+  wall plane 1.2, open at 1.55; pedestal tight to its 0.9 m box. Plus a
+  stuck-guard (walk free if ever inside geometry).
+- **level.ts full rewrite**: interior partition bulkheads extracted from
+  the map as maximal runs (longer axis wins) with gold caps + jambs +
+  gate lintels; pool scanned from '~' cells; sanctum slot discs; THE
+  ACQUISITION ALTAR (gold altar + spinning sigil orb + light column);
+  two sittable Promenade benches; zones table; 21 god-ray shafts
+  computed from pedestals/altar/galleries; setDust/setShafts/setMood
+  (cinema/dawn)/sparkleBurst/riteBurst/orbBoost/starBoost; sky shader
+  gained a uStar twinkle field.
+- **products.ts**: 10 new relics with use-verbs — PILGRIM BENCH (sit),
+  SERAPH WINGS (ascend), AURORA LAMP (light), LUMEN FERN (bloom),
+  MOON JAR (revere), PRISM TOWER (harmony), TITAN VIEW 55 (cinema),
+  STAR CHART 1701 (stars), DAWN BELL (dawn), CELESTIAL CHRONOMETER
+  (chime) → 20 catalog relics, ordered to match pedestal scan order.
+- **hands.ts (THE HANDS)**: real 3D viewmodel seraph hands — RoundedBox
+  palms, 28 jointed finger volumes, pearlescent MeshPhysicalMaterial
+  with golden sheen + clearcoat, gilded cuff torus at each wrist, own
+  key/rim/fill lights + PMREM env; 9 poses (idle/reach/press/camera/
+  mug/revere/rest/thumbs/carry) with lerped joint animation, sway from
+  look velocity, walk bob, breathing; held props (VOIDCAM + HALO MUG
+  meshes) pop in when posed. Rendered after the post chain in a
+  depth-cleared overlay pass — bloom never blows them out.
+- **settings.ts + GradePass**: 3 quality tiers (GLORY/BALANCED/LITE) and
+  6 screen-shader grades (PEARL, GOLDEN HOUR, MOONLIT, SCRIPTORIUM,
+  RETRO DOOM with 12-level posterize + Bayer4 dither + scanlines, VIVID)
+  in a post-OutputPass ShaderPass; FOV/bloom/sensitivity/invertY/
+  headBob/dust/godRays/volume/showFps; localStorage persistence.
+  RETRO verified mathematically (canvas-crop palette collapsed to
+  ~4.5 k colors; DOM overlays account for the rest).
+- **engine.ts full rewrite**: honest collision (grid walls+water + level
+  AABBs + dynamic owned-prop colliders); unified PromptInfo system
+  (inspect/use/sit/altar/place/stand); owned relics live on traveling
+  gold plinths in the Sanctum (spawnOwned/hasOwned); SIT state machine
+  (smoothstep camera lerp, stand-out collision probe); PHOTO MODE (FOV
+  lerp to 34, shutter, same-task canvas.toDataURL capture → gallery);
+  CARRY/PLACE (R pickup, E place, layout persisted to localStorage,
+  restored on boot); 14 use-verbs with buffs (CLOUDSTEP +25%, BLESSED
+  +18%, AURORA halo light, ASCEND eye-height rise); altar proximity →
+  onAltarRite; ceremony() rite burst + thumbs pose; zone tracking;
+  adaptive governor now 3-tier; settings applied live.
+- **DB/API**: inventory table + deliverToInventory upsert on checkout;
+  GET /api/inventory; MAX_CUSTOM_PRODUCTS 6 → 10 (ten forge shrines).
+- **UI**: SettingsDialog (tabs: VISUALS/SCREEN SHADER/CONTROLS), PhotoMode
+  viewfinder + gallery + downloads, CeremonyOverlay (divine invoice),
+  CodexDialog (SERAPH BOOK readable), zone banner, buff chips, HUD ⚙
+  button, minimap draws slots/altar/owned diamonds at 9.5 m view,
+  CartDrawer → shared runCheckout (altar + drawer both perform the rite),
+  G hotkey, help/manual copy updated.
+- **E2E (scripts/verify-v2.sh)**: 23 checks ALL GREEN — title/enter,
+  20 sprites + 30 pedestals + Sanctum spawn, analytic collision probes,
+  full purchase (cart → altar → ceremony overlay → SQLite order +
+  inventory delivery), owned relic usable, sofa SIT + STAND, photo mode
+  (real PNG + gallery), carry + place + localStorage persistence,
+  RETRO DOOM grade, zone tracking, zero console errors. Headless
+  SwiftShader runs ~2.5 fps (auto-governor handles it; real GPUs fine).
+- Fixed along the way: carry prompt not refreshing on pickup (setPrompt
+  PLACE), stuck-in-geometry guard, RETRO grade shader order (grain/vignette
+  now feed the posterizer), Forge.tsx latent 'prev' updater bug,
+  db.ts SQLOutputValue casts, lint set-state-in-effect in SettingsDialog.
+
+Stage Summary:
+- Deliverable: CELESTIA GALLERIA ✦ v2.0 — THE GRAND MALL. 43 meters of
+  Doom-method sprite retail across six halls; honest touchable walls; a
+  real-buy loop ending at a golden altar with a light-column ceremony;
+  purchased relics take flesh in THE SANCTUM and WORK (sit, shoot real
+  PNGs, sip blessings, equip speed, read the codex, light your own halo,
+  dim the temple for cinema, burst angel dust, twinkle the stars, ring a
+  sunrise, ascend on wings, sing the temple, chime the hour); carry and
+  re-place them anywhere; 3D seraph hands pose through every rite; a
+  settings shrine commanding six screen-shader grades and three quality
+  tiers. 23/23 E2E checks green, lint clean, tsc clean.

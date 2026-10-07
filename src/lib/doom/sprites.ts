@@ -84,13 +84,30 @@ function spriteMaterial(map: THREE.Texture, reflect: boolean): THREE.ShaderMater
   return m;
 }
 
-function makeTag(spec: ProductSpec, qty: number): HTMLCanvasElement {
+function makeTag(spec: ProductSpec, qty: number, owned = false): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.width = 160;
   c.height = 56;
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = "rgba(22,18,10,0.82)";
   ctx.fillRect(0, 8, 160, 40);
+  if (owned) {
+    // YOURS — the relic is paid for and alive
+    ctx.strokeStyle = "#ffd98c";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(1, 9, 158, 38);
+    ctx.strokeStyle = "rgba(157,232,184,0.5)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(3, 11, 154, 34);
+    ctx.font = "bold 17px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#f7f0dd";
+    ctx.fillText(spec.name.slice(0, 15), 80, 22);
+    ctx.fillStyle = "#9de8b8";
+    ctx.fillText("YOURS · USE [E]", 80, 40);
+    return c;
+  }
   ctx.strokeStyle = `#${spec.accent.toString(16).padStart(6, "0")}`;
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 9, 158, 38);
@@ -129,8 +146,9 @@ export class ProductSprite {
   private haloMat: THREE.MeshStandardMaterial;
   private frame = 0;
   private hover = false;
+  private ownedFlag = false;
   private bob = Math.random() * Math.PI * 2;
-  private baseY: number;
+  private baseY = 0;
   /** alpha content box of the current atlas, fractions [y0, y1, x0, x1] (y TOP) */
   private content: [number, number, number, number];
   private readonly pedestalTop: number;
@@ -277,8 +295,14 @@ export class ProductSprite {
     (this.haloGlow.material as THREE.SpriteMaterial).opacity = h ? 0.85 : 0.5;
   }
 
+  /** v2.0 — this relic is OWNED: the tag becomes YOURS · USE [E] */
+  setOwned(v: boolean) {
+    this.ownedFlag = v;
+    this.updateTag(0);
+  }
+
   updateTag(qty: number) {
-    const c = makeTag(this.spec, qty);
+    const c = makeTag(this.spec, qty, this.ownedFlag);
     this.tagCanvas.width = c.width;
     this.tagCanvas.height = c.height;
     this.tagCanvas.getContext("2d")!.drawImage(c, 0, 0);

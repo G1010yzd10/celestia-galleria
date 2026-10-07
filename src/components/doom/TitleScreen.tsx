@@ -137,14 +137,14 @@ export function TitleScreen({
           ✦ FORMERLY DOOM MART — REBORN IN GOLDEN LIGHT ✦
         </div>
         <div className="font-mono text-neutral-500 text-[10px] md:text-xs mt-1 text-center">
-          9-ANGLE SPRITES · MIRROR MARBLE · BUDGET GLORIOUSLY BROKEN · ZERO DOWNLOADS
+          v2.0 · THE GRAND MALL · 20 RELICS · USE WHAT YOU BUY · THE HANDS ARE REAL
         </div>
 
         <Button
           onClick={onEnter}
           className="mt-8 h-12 md:h-14 px-8 md:px-12 text-lg md:text-xl font-mono font-bold tracking-widest border-2 border-amber-300 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 text-[#241304] shadow-[0_0_36px_rgba(255,208,120,0.55)] hover:from-amber-200 hover:to-amber-500 active:translate-y-0.5"
         >
-          ✦ ASCEND TO THE SHOP
+          ✦ ASCEND TO THE MALL
         </Button>
 
         {/* the creator's wing — forge your own sprites, learn the craft */}

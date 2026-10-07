@@ -10,14 +10,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useShop } from "@/lib/store";
+import type { CartItem } from "@/lib/doom/types";
 
-export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void }) {
+export function CartDrawer({ onCheckout }: { onCheckout: (items: CartItem[]) => Promise<void> | void }) {
   const cart = useShop((s) => s.cart);
   const cartOpen = useShop((s) => s.cartOpen);
   const setCartOpen = useShop((s) => s.setCartOpen);
   const setQty = useShop((s) => s.setQty);
   const removeFromCart = useShop((s) => s.removeFromCart);
-  const clearCart = useShop((s) => s.clearCart);
   const lastOrder = useShop((s) => s.lastOrder);
   const setLastOrder = useShop((s) => s.setLastOrder);
 
@@ -31,18 +31,9 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: cart, customer: "WALK-IN" }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Checkout failed");
-      setLastOrder({ orderId: data.orderId, total: data.total });
-      clearCart();
-      onCheckoutSound();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Checkout terminal offline");
+      await onCheckout(cart);
+    } catch {
+      setError("Checkout terminal offline");
     } finally {
       setBusy(false);
     }
@@ -66,12 +57,14 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
         {lastOrder && (
           <div className="m-4 border-2 border-green-600/70 bg-green-950/40 p-4 text-sm">
             <div className="text-green-400 font-bold tracking-widest text-base">
-              ✔ ORDER PLACED — BLESSINGS RENDERED
+              ✔ RITE COMPLETE — RELICS DELIVERED
             </div>
             <div className="text-neutral-400 text-xs mt-1.5 font-mono">
               ORDER #{lastOrder.orderId.slice(0, 8).toUpperCase()}
               <br />
               {lastOrder.total.toLocaleString()} CREDITS CHARGED
+              <br />
+              <span className="text-amber-300/80">AWAITING YOU IN THE SANCTUM — SOUTH HALL</span>
             </div>
             <Button
               variant="outline"
@@ -152,10 +145,10 @@ export function CartDrawer({ onCheckoutSound }: { onCheckoutSound: () => void })
             onClick={checkout}
             className="w-full h-12 font-bold tracking-[0.3em] border-2 border-amber-400 bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 hover:from-amber-200 hover:to-amber-500 disabled:opacity-40 !text-[#241304]"
           >
-            {busy ? "AUTHORIZING…" : "✦ CHECKOUT"}
+            {busy ? "AUTHORIZING…" : "✦ RITE OF ACQUISITION"}
           </Button>
           <div className="text-[9px] text-neutral-600 mt-2 text-center tracking-wider">
-            DEMO CHECKOUT — ORDERS PERSIST TO SQLITE (node:sqlite)
+            ORDERS PERSIST TO SQLITE · RELICS DELIVER TO THE SANCTUM · OR WALK THEM TO THE GOLDEN ALTAR
           </div>
         </div>
       </SheetContent>

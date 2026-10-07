@@ -1,14 +1,16 @@
 import * as THREE from "three";
-import { parseMap, CELL, type LevelGrid } from "./types";
+import { parseMap, MAP_ART, CELL, type LevelGrid, type Collider, type ZoneInfo } from "./types";
 import { texWall, texCeil, texPedestal, texSign, texGlow, texBeam } from "./textures";
 import { trackedCanvasTexture, mem } from "./memory";
 import { buildWater, type WaterRig } from "./water";
 
-// ─── CELESTIA GALLERIA — the atrium between worlds, BUDGET BROKEN ed. ──────
-// Ivory marble, gilded coffered ceiling with an open oculus, god-ray light
-// shafts falling onto a celestial lagoon, a true planar-mirror marble floor —
-// and now a PMREM sky probe so every gold surface drinks the heavens.
-// The 4 MB Doom club was left behind on purpose; the method stayed.
+// ─── CELESTIA GALLERIA ✦ :: v2.0 THE GRAND MALL ─────────────────────────────
+// 43 × 36 meters of celestial retail: a Forge Gallery in the north, a Grand
+// Atrium around the lagoon, two relic wings off the Promenade, and THE
+// SANCTUM in the south — where purchased relics take flesh and become usable.
+// Collision is now HONEST: walls sit on the inner faces of their cells and
+// every prop gets a tight AABB. No invisible obstacles. The pilgrim may walk
+// up and touch the marble.
 
 export const WALL_H = 4.2;
 export const PED_SIZE = 0.9;
@@ -16,6 +18,10 @@ export const PED_TOP = 0.96;
 export const FLOOR_Y = 0;
 export const WATER_Y = -0.32;
 export const POOL_FLOOR_Y = -1.1;
+/** slim gold plinth owned relics stand on inside the Sanctum */
+export const PLINTH_H = 0.42;
+/** bench seat height in the Promenade */
+export const BENCH_SEAT_Y = 0.46;
 
 export interface PedestalInfo {
   col: number;
@@ -25,26 +31,42 @@ export interface PedestalInfo {
   top: number;
 }
 
+export interface BenchInfo {
+  pos: THREE.Vector3;
+  /** yaw the seated pilgrim faces */
+  yaw: number;
+  seatY: number;
+}
+
 export interface LevelRig {
   group: THREE.Group;
   grid: LevelGrid;
   pedestals: PedestalInfo[];
+  colliders: Collider[];
+  sanctumSlots: THREE.Vector3[];
+  altar: { pos: THREE.Vector3 };
+  benches: BenchInfo[];
+  zones: ZoneInfo[];
   pool: { cx: number; cz: number; w: number; d: number };
   spawn: { x: number; z: number; yaw: number };
-  /** PMREM-baked pearl-sky cubemap — set as scene.environment by the engine */
   envTexture: THREE.Texture;
-  /** owning RT for envTexture (disposed by the engine) */
   envRT: THREE.WebGLRenderTarget;
   update(t: number, dt: number): void;
-  /** render the scene into the floor's mirror target (call before main pass) */
   renderReflection(
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
     hidden: THREE.Object3D[]
   ): void;
-  /** toggle the mirror blend (lite quality tier runs marble-only) */
   setMirror(on: boolean): void;
+  // v2.0 living-temple controls
+  setDust(k: number): void;
+  setShafts(on: boolean): void;
+  setMood(mood: "cinema" | "dawn" | null): void;
+  sparkleBurst(x: number, z: number): void;
+  riteBurst(x: number, z: number): void;
+  orbBoost(seconds: number): void;
+  starBoost(k: number): void;
 }
 
 // ── sky dome: animated pearl heavens, zero texture bytes ──
@@ -62,6 +84,7 @@ const SKY_FRAG = /* glsl */ `
   uniform vec3 uSunDir;
   uniform vec3 uSunCol;
   uniform float uTime;
+  uniform float uStar;
   varying vec3 vDir;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -97,6 +120,12 @@ const SKY_FRAG = /* glsl */ `
 
     // faint golden shimmer band near horizon
     col += vec3(0.30, 0.22, 0.08) * pow(1.0 - abs(d.y), 9.0) * 0.5;
+
+    // STAR CHART wink: twinkling studs across the zenith when uStar > 0
+    float starNoise = hash(floor(vec2(atan(d.z, d.x) * 36.0, d.y * 42.0)));
+    float tw = smoothstep(0.992, 1.0, starNoise)
+             * (0.55 + 0.45 * sin(uTime * 3.2 + starNoise * 60.0));
+    col += vec3(1.0, 0.98, 0.9) * tw * uStar * smoothstep(0.06, 0.32, d.y);
 
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
@@ -170,6 +199,7 @@ const FLOOR_FRAG = /* glsl */ `
   uniform float uMirror;
   uniform vec3 uPoolCenter;
   uniform vec2 uPoolHalf;
+  uniform vec2 uInner;      // inner wall face coords (x = north z, y = east x)
   varying vec3 vWorld;
   varying vec4 vMirror;
   #include <fog_pars_fragment>
@@ -223,9 +253,9 @@ const FLOOR_FRAG = /* glsl */ `
     float fr = pow(1.0 - clamp(V.y, 0.0, 1.0), 3.0);
     vec3 col = mix(base, refl, (0.26 + 0.74 * fr) * uMirror);
 
-    // halo-light strip streaks
-    float streakN = exp(-abs(vWorld.z - 0.12) * 1.35);
-    float streakE = exp(-abs(vWorld.x - 19.08) * 1.35);
+    // halo-light strip streaks hugging the inner faces
+    float streakN = exp(-abs(vWorld.z - uInner.x) * 1.35);
+    float streakE = exp(-abs(vWorld.x - uInner.y) * 1.35);
     col += vec3(0.06, 0.30, 0.27) * streakN * fr;
     col += vec3(0.30, 0.20, 0.05) * streakE * fr;
 
@@ -326,10 +356,11 @@ const AQUA_BRIGHT = new THREE.Color(0x3fd8c8).multiplyScalar(2.0);
 export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   const group = new THREE.Group();
   const grid = parseMap();
-  const W = grid.w * CELL; // 19.2
-  const D = grid.h * CELL; // 16.8
+  const W = grid.w * CELL; // 43.2
+  const D = grid.h * CELL; // 36.0
   const cx = W / 2;
   const cz = D / 2;
+  const colliders: Collider[] = [];
 
   // ── textures (shared) ──
   const wallTex = trackedCanvasTexture(texWall());
@@ -353,6 +384,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     emissive: 0x2a1c05,
     emissiveIntensity: 0.6,
   });
+
   // ── sky dome (seen through the oculus) ──
   const skyMat = new THREE.ShaderMaterial({
     vertexShader: SKY_VERT,
@@ -363,60 +395,199 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
       uSunDir: { value: new THREE.Vector3(0.1, 1.0, 0.05).normalize() },
       uSunCol: { value: new THREE.Color(1.0, 0.93, 0.78) },
       uTime: { value: 0 },
+      uStar: { value: 0 },
     },
     side: THREE.BackSide,
     depthWrite: false,
   });
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(30, 32, 18), skyMat);
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(42, 32, 18), skyMat);
   sky.position.set(cx, 1.5, cz);
   sky.renderOrder = -10;
   group.add(sky);
 
   // ── environment probe: bake the pearl heavens into a PMREM cubemap so ──
-  // every gold surface (cornices, capitals, reliquaries, halos) reflects the
-  // sky. THE budget-broken glow-up: ~1.4 MB once, infinite divinity.
+  // every gold surface (cornices, capitals, reliquaries, halos, HANDS)
+  // reflects the sky. THE budget-broken glow-up, now serving the whole mall.
   const envScene = new THREE.Scene();
-  const envSky = new THREE.Mesh(new THREE.SphereGeometry(30, 24, 14), skyMat);
+  const envSky = new THREE.Mesh(new THREE.SphereGeometry(42, 24, 14), skyMat);
   envScene.add(envSky);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envRT = pmrem.fromScene(envScene, 0.07);
   pmrem.dispose();
   envSky.geometry.dispose();
   const envTexture = envRT.texture;
-  // cubemap ≈ 6 faces + mips — registered so the HUD stays honest
   mem.register(envTexture, 256, 256 * 6, true);
 
-  // ── heaven reflections: every PBR surface now drinks the sky probe ──
   wallMat.envMapIntensity = 0.4;
   goldMat.envMapIntensity = 1.35;
 
-  // ── perimeter walls ──
-  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, 0], 0));
-  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, D], Math.PI));
-  group.add(wallPlane(D, D / CELL, wallMat, [W, WALL_H / 2, cz], -Math.PI / 2));
-  group.add(wallPlane(D, D / CELL, wallMat, [0, WALL_H / 2, cz], Math.PI / 2));
+  // ══════════════════════════════════════════════════════════════════════
+  // HONEST WALLS — planes sit on the INNER faces of their cells, so the
+  // collision grid and the visible marble finally agree. The 1.2 m ring of
+  // "hidden obstacle" between you and the wall is gone. Touch the temple.
+  // ══════════════════════════════════════════════════════════════════════
+  // north (faces +Z / south into the mall), spans full W to cover corners
+  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, CELL], 0));
+  group.add(wallPlane(W, W / CELL, wallMat, [cx, WALL_H / 2, D - CELL], Math.PI));
+  group.add(wallPlane(D - 2 * CELL, (D - 2 * CELL) / CELL, wallMat, [W - CELL, WALL_H / 2, cz], -Math.PI / 2));
+  group.add(wallPlane(D - 2 * CELL, (D - 2 * CELL) / CELL, wallMat, [CELL, WALL_H / 2, cz], Math.PI / 2));
 
-  // ── gilded cornice + base rails ──
+  // ── gilded cornice + base rails on the inner faces ──
   const trim = (len: number, pos: [number, number, number], rotY: number) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(len, 0.07, 0.07), goldMat);
     m.position.set(...pos);
     m.rotation.y = rotY;
     group.add(m);
   };
-  trim(W - 0.3, [cx, WALL_H - 0.14, 0.08], 0);
-  trim(W - 0.3, [cx, WALL_H - 0.14, D - 0.08], 0);
-  trim(D - 0.3, [W - 0.08, WALL_H - 0.14, cz], Math.PI / 2);
-  trim(D - 0.3, [0.08, WALL_H - 0.14, cz], Math.PI / 2);
-  trim(W - 0.3, [cx, 0.16, 0.08], 0);
-  trim(W - 0.3, [cx, 0.16, D - 0.08], 0);
-  trim(D - 0.3, [W - 0.08, 0.16, cz], Math.PI / 2);
-  trim(D - 0.3, [0.08, 0.16, cz], Math.PI / 2);
+  trim(W - 0.3, [cx, WALL_H - 0.14, CELL + 0.08], 0);
+  trim(W - 0.3, [cx, WALL_H - 0.14, D - CELL - 0.08], 0);
+  trim(D - 2.6, [W - CELL - 0.08, WALL_H - 0.14, cz], Math.PI / 2);
+  trim(D - 2.6, [CELL + 0.08, WALL_H - 0.14, cz], Math.PI / 2);
+  trim(W - 0.3, [cx, 0.16, CELL + 0.08], 0);
+  trim(W - 0.3, [cx, 0.16, D - CELL - 0.08], 0);
+  trim(D - 2.6, [W - CELL - 0.08, 0.16, cz], Math.PI / 2);
+  trim(D - 2.6, [CELL + 0.08, 0.16, cz], Math.PI / 2);
 
-  // ── pool rectangle (from map art rows 4..7, cols 4..11) ──
-  const poolX0 = 4 * CELL,
-    poolX1 = 12 * CELL,
-    poolZ0 = 4 * CELL,
-    poolZ1 = 8 * CELL;
+  // ══════════════════════════════════════════════════════════════════════
+  // INTERIOR PARTITIONS — chunky 1.2 m bulkheads extracted from the map as
+  // maximal runs (longer axis wins). Each run = two textured faces + gold
+  // caps + gilded jambs at every doorway end. Full-cell thickness, so the
+  // blocked cells and the visible marble are the same stone.
+  // ══════════════════════════════════════════════════════════════════════
+  const isBorder = (c: number, r: number) =>
+    c === 0 || r === 0 || c === grid.w - 1 || r === grid.h - 1;
+  const isWall = (c: number, r: number) =>
+    c >= 0 && r >= 0 && c < grid.w && r < grid.h && grid.cells[r * grid.w + c] === 1;
+
+  function hRunLen(c: number, r: number) {
+    let a = c, b = c;
+    while (isWall(a - 1, r) && !isBorder(a - 1, r)) a--;
+    while (isWall(b + 1, r) && !isBorder(b + 1, r)) b++;
+    return { a, b, len: b - a + 1 };
+  }
+  function vRunLen(c: number, r: number) {
+    let a = r, b = r;
+    while (isWall(c, a - 1) && !isBorder(c, a - 1)) a--;
+    while (isWall(c, b + 1) && !isBorder(c, b + 1)) b++;
+    return { a, b, len: b - a + 1 };
+  }
+
+  const visited = new Uint8Array(grid.w * grid.h);
+  const goldCap = (len: number, x: number, z: number, alongZ: boolean) => {
+    for (const y of [WALL_H - 0.05, 0.14]) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(alongZ ? 0.14 : len, 0.09, alongZ ? len : 0.14),
+        goldMat
+      );
+      m.position.set(x, y, z);
+      group.add(m);
+    }
+  };
+  const jamb = (x: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.12, WALL_H, 0.12), goldMat);
+    m.position.set(x, WALL_H / 2, z);
+    group.add(m);
+  };
+
+  for (let r = 1; r < grid.h - 1; r++) {
+    for (let c = 1; c < grid.w - 1; c++) {
+      if (visited[r * grid.w + c] || !isWall(c, r)) continue;
+      const h = hRunLen(c, r);
+      const v = vRunLen(c, r);
+      if (h.len >= v.len && h.len >= 1) {
+        // horizontal bulkhead along row r
+        const L = h.len * CELL;
+        const mx = ((h.a + h.b + 1) / 2) * CELL;
+        const zS = r * CELL;          // south face (faces +Z)
+        const zN = (r + 1) * CELL;    // north face (faces -Z)
+        group.add(wallPlane(L, L / CELL, wallMat, [mx, WALL_H / 2, zS], 0));
+        group.add(wallPlane(L, L / CELL, wallMat, [mx, WALL_H / 2, zN], Math.PI));
+        goldCap(L, mx, r * CELL + CELL / 2, false);
+        jamb(h.a * CELL + 0.06, r * CELL + CELL / 2);
+        jamb((h.b + 1) * CELL - 0.06, r * CELL + CELL / 2);
+        for (let x = h.a; x <= h.b; x++) visited[r * grid.w + x] = 1;
+      } else {
+        // vertical bulkhead along column c
+        const L = v.len * CELL;
+        const mz = ((v.a + v.b + 1) / 2) * CELL;
+        const xW = c * CELL;          // west face (faces -X)
+        const xE = (c + 1) * CELL;    // east face (faces +X)
+        group.add(wallPlane(L, L / CELL, wallMat, [xW, WALL_H / 2, mz], -Math.PI / 2));
+        group.add(wallPlane(L, L / CELL, wallMat, [xE, WALL_H / 2, mz], Math.PI / 2));
+        goldCap(L, c * CELL + CELL / 2, mz, true);
+        jamb(c * CELL + CELL / 2, v.a * CELL + 0.06);
+        jamb(c * CELL + CELL / 2, (v.b + 1) * CELL - 0.06);
+        for (let y = v.a; y <= v.b; y++) visited[y * grid.w + c] = 1;
+      }
+    }
+  }
+
+  // ── gate lintels — arches over every doorway ──
+  const Lintel = (gx: number, gz: number, w: number, d: number) => {
+    const h = WALL_H - 2.9;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+    m.position.set(gx, 2.9 + h / 2, gz);
+    group.add(m);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, 0.09, d + 0.04), goldMat);
+    bar.position.set(gx, 2.92, gz);
+    group.add(bar);
+  };
+  // horizontal partition gates (rows 3, 14, 23): W cols 5-6 · grand 16-19 · E 29-30
+  for (const gr of [3, 14, 23]) {
+    Lintel(6 * CELL, gr * CELL + CELL / 2, 2 * CELL, CELL);
+    Lintel(18 * CELL, gr * CELL + CELL / 2, 4 * CELL, CELL);
+    Lintel(30 * CELL, gr * CELL + CELL / 2, 2 * CELL, CELL);
+  }
+  // wing gates (cols 12 & 23, rows 18-19)
+  for (const gc of [12, 23]) {
+    Lintel(gc * CELL + CELL / 2, 19 * CELL, CELL, 2 * CELL);
+  }
+
+  // ── halo light strips (inner faces) ──
+  group.add(neonStrip(W - 2.4, AQUA_BRIGHT, [cx, 3.35, CELL + 0.06], 0, beamTex)); // N aqua
+  group.add(neonStrip(D - 2.4, AQUA_BRIGHT, [W - CELL - 0.06, 3.35, cz], Math.PI / 2, beamTex)); // E aqua
+  group.add(neonStrip(D - 2.4, GOLD_BRIGHT, [CELL + 0.06, 3.35, cz], -Math.PI / 2, beamTex)); // W gold
+  group.add(neonStrip(20, GOLD_BRIGHT, [cx, 3.1, D - CELL - 0.06], Math.PI, beamTex)); // S gold
+
+  // ── wing & zone signage ──
+  group.add(sign("CELESTIA GALLERIA", 5.2, [cx, 2.6, CELL + 0.03], 0, "#ffd98c"));
+  group.add(sign("THE SPRITE FORGE", 3.0, [cx, 1.7, CELL + 0.03], 0, "#9ff5ec"));
+  group.add(sign("GRAND ATRIUM", 2.6, [cx, 3.45, 4 * CELL + 0.03], 0, "#ffd98c"));
+  group.add(sign("THE FORGE GALLERY", 2.2, [cx, 3.45, 3 * CELL - 0.03], Math.PI, "#9ff5ec"));
+  group.add(sign("GARDEN & AUDIO", 2.2, [6 * CELL, 3.45, 14 * CELL - 0.03], Math.PI, "#3fd8c8"));
+  group.add(sign("THE PROMENADE", 2.4, [cx, 3.45, 14 * CELL - 0.03], Math.PI, "#ffd98c"));
+  group.add(sign("VISION", 2.2, [30 * CELL, 3.45, 14 * CELL - 0.03], Math.PI, "#3fd8c8"));
+  group.add(sign("TO THE SANCTUM", 2.4, [cx, 3.45, 15 * CELL + 0.03], 0, "#ffd98c"));
+  group.add(sign("THE SANCTUM", 3.0, [cx, 3.45, 24 * CELL - 0.03], Math.PI, "#ffd98c"));
+  group.add(sign("RITE OF ACQUISITION", 2.6, [21.6, 2.35, 30.05], 0, "#ffb46c"));
+  group.add(sign("YOUR RELICS TAKE FLESH HERE", 3.4, [cx, 2.2, D - CELL - 0.03], Math.PI, "#9de8b8"));
+
+  // ══════════════════════════════════════════════════════════════════════
+  // THE CELESTIAL LAGOON — scanned from the map's '~' cells
+  // ══════════════════════════════════════════════════════════════════════
+  let poolX0 = Infinity, poolX1 = -Infinity, poolZ0 = Infinity, poolZ1 = -Infinity;
+  let spawn = { x: cx, z: cz, yaw: 0 };
+  const sanctumSlots: THREE.Vector3[] = [];
+  const altarCell: { x0: number; x1: number; z0: number; z1: number } = { x0: 0, x1: 0, z0: 0, z1: 0 };
+  let altarSeen = false;
+  for (let r = 0; r < grid.h; r++) {
+    for (let c = 0; c < grid.w; c++) {
+      const v = grid.cells[r * grid.w + c];
+      const wx = c * CELL, wz = r * CELL;
+      if (v === 2) {
+        poolX0 = Math.min(poolX0, wx); poolX1 = Math.max(poolX1, wx + CELL);
+        poolZ0 = Math.min(poolZ0, wz); poolZ1 = Math.max(poolZ1, wz + CELL);
+      } else if (v === 4) {
+        sanctumSlots.push(new THREE.Vector3(c * CELL + CELL / 2, 0, r * CELL + CELL / 2));
+      } else if (v === 5) {
+        if (!altarSeen) { altarCell.x0 = wx; altarCell.z0 = wz; altarSeen = true; }
+        altarCell.x1 = Math.max(altarCell.x1, wx + CELL);
+        altarCell.z1 = Math.max(altarCell.z1, wz + CELL);
+      } else if (MAP_ART[r][c] === "^") {
+        spawn = { x: c * CELL + CELL / 2, z: r * CELL + CELL / 2, yaw: 0 };
+      }
+    }
+  }
   const pool = {
     cx: (poolX0 + poolX1) / 2,
     cz: (poolZ0 + poolZ1) / 2,
@@ -424,9 +595,8 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     d: poolZ1 - poolZ0,
   };
 
-  // ── mirror marble floor (4 segments around the pool hole) ──
-  // reflection render target — 896×448 RGBA, honestly tracked. The 4 MB club
-  // is gone; the mirror got 4× the pixels so the reflections read like glass.
+  // ── mirror marble floor (segments around the pool hole) ──
+  // reflection render target — 896×448 RGBA, honestly tracked.
   const MIRROR_W = 896;
   const MIRROR_H = 448;
   const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H);
@@ -435,8 +605,6 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   mirrorRT.texture.generateMipmaps = false;
   mem.register(mirrorRT.texture, MIRROR_W, MIRROR_H, false);
 
-  // shared mirror projection matrix — the floor AND the lagoon water sample
-  // through this exact object (updated in place every frame)
   const texMat = new THREE.Matrix4();
 
   const floorMat = new THREE.ShaderMaterial({
@@ -451,13 +619,12 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
         uMirror: { value: 1 },
         uPoolCenter: { value: new THREE.Vector3(pool.cx, 0, pool.cz) },
         uPoolHalf: { value: new THREE.Vector2(pool.w / 2, pool.d / 2) },
+        uInner: { value: new THREE.Vector2(CELL, W - CELL) },
       },
     ]),
     fog: true,
   });
   const fu = floorMat.uniforms as Record<string, { value: unknown }>;
-  // re-bind the live render-target AFTER merge — mergeUniforms clones texture
-  // values, which would sever the mirror sampling. Same for the shared matrix.
   fu.tDiffuse.value = mirrorRT.texture;
   fu.uTexMat.value = texMat;
 
@@ -502,7 +669,6 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     camera.getWorldDirection(_camDir);
     _camUp.set(0, 1, 0).applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
 
-    // mirror camera across the y = FLOOR_Y plane
     _mPos.set(_camPos.x, 2 * FLOOR_Y - _camPos.y, _camPos.z);
     const mDir = new THREE.Vector3(_camDir.x, -_camDir.y, _camDir.z);
     const mUp = new THREE.Vector3(_camUp.x, -_camUp.y, _camUp.z);
@@ -515,14 +681,11 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     virtualCam.projectionMatrix.copy(camera.projectionMatrix);
     virtualCam.updateMatrixWorld();
 
-    // projective sampling matrix (world → mirror-clip → [0,1]) — shared object,
-    // the water shader samples the same live matrix
     texMat
       .copy(BIAS)
       .multiply(virtualCam.projectionMatrix)
       .multiply(virtualCam.matrixWorldInverse);
 
-    // oblique near-plane clipping so nothing below the floor leaks in
     _plane.setFromNormalAndCoplanarPoint(
       new THREE.Vector3(0, 1, 0),
       new THREE.Vector3(0, FLOOR_Y, 0)
@@ -543,7 +706,6 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     pm.elements[14] = clip.w;
     virtualCam.projectionMatrixInverse.copy(pm).invert();
 
-    // render the reflected world (self + caller-hidden objects removed)
     for (const f of floorSegs) f.visible = false;
     for (const h of hidden) h.visible = false;
     const prevRT = renderer.getRenderTarget();
@@ -562,7 +724,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     water.setMirror(on);
   }
 
-  // ── pool cavity ──
+  // ── pool cavity + water ──
   const cavityMat = new THREE.MeshStandardMaterial({
     color: 0x0c2a33,
     roughness: 0.85,
@@ -592,7 +754,6 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   poolFloor.position.set(pool.cx, POOL_FLOOR_Y, pool.cz);
   group.add(poolFloor);
 
-  // water rig (celestial lagoon — drinks from the shared planar mirror)
   const water: WaterRig = buildWater(
     pool.cx,
     pool.cz,
@@ -642,7 +803,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   }
 
   // ── gilded coffered ceiling with open elliptical oculus ──
-  const ocRx = Math.min(pool.w, pool.d) * 0.42; // ~2.0
+  const ocRx = Math.min(pool.w, pool.d) * 0.42;
   const ocRy = Math.min(pool.w, pool.d) * 0.34;
   const ceilShape = new THREE.Shape();
   ceilShape.moveTo(-W / 2, -D / 2);
@@ -663,7 +824,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   );
   ceilShape.holes.push(hole);
   const ceilGeo = new THREE.ShapeGeometry(ceilShape, 48);
-  ceilGeo.rotateX(Math.PI / 2); // face down
+  ceilGeo.rotateX(Math.PI / 2);
   scaleUV(ceilGeo, 1 / CELL, 1 / CELL);
   const ceil = new THREE.Mesh(
     ceilGeo,
@@ -672,7 +833,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   ceil.position.set(cx, WALL_H, cz);
   group.add(ceil);
 
-  // oculus gold rim (ellipse approximated by segments)
+  // oculus gold rim
   const RIM_SEG = 40;
   for (let i = 0; i < RIM_SEG; i++) {
     const a0 = (i / RIM_SEG) * Math.PI * 2;
@@ -699,32 +860,20 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
       fog: false,
     })
   );
-  glare.rotation.x = Math.PI / 2; // face down
+  glare.rotation.x = Math.PI / 2;
   glare.scale.set(ocRx * 0.72, ocRy * 0.72, 1);
   glare.position.set(pool.cx, WALL_H - 0.1, pool.cz);
   glare.renderOrder = 6;
   group.add(glare);
 
-  // ── god-ray shafts: fake volumetric light cylinders ──
-  // four nested cones down the oculus onto the lagoon, plus four slim
-  // columns of sanctum light over the pedestal shrines
+  // ══════════════════════════════════════════════════════════════════════
+  // GOD RAYS — four nested cones down the oculus + slim sanctum columns over
+  // every atrium pedestal, the altar, the forge gallery and the Sanctum.
+  // ══════════════════════════════════════════════════════════════════════
   const shafts: THREE.Mesh[] = [];
-  const shaftSpecs: [number, number, number, number, number, number][] = [
-    // [x, z, radius, intensity, tiltZ, tiltX] — first 4 = oculus, then pedestals
-    [pool.cx, pool.cz, 0.42, 0.5, 0.02, 0.015],
-    [pool.cx, pool.cz, 0.85, 0.34, -0.03, 0.02],
-    [pool.cx, pool.cz, 1.35, 0.22, 0.05, -0.03],
-    [pool.cx, pool.cz, 1.9, 0.12, -0.06, 0.04],
-    [4.2, 3.0, 0.5, 0.15, 0.03, -0.02],
-    [15.0, 3.0, 0.5, 0.15, -0.03, 0.02],
-    [4.2, 13.8, 0.55, 0.12, 0.02, 0.03],
-    [15.0, 13.8, 0.55, 0.12, -0.02, -0.03],
-    [9.0, 1.8, 0.9, 0.11, 0.02, -0.02], // north gallery — the Forge shrines
-  ];
-  for (let i = 0; i < shaftSpecs.length; i++) {
-    const [sx, sz, r, inten, tz, tx] = shaftSpecs[i];
-    const bottom = i < 4 ? WATER_Y : FLOOR_Y; // oculus shafts fall into the lagoon
-    const shaftHeight = WALL_H - bottom;
+  const shaftBase: number[] = [];
+  function addShaft(x: number, z: number, r: number, inten: number, bottom: number) {
+    const h = WALL_H - bottom;
     const mat = new THREE.ShaderMaterial({
       vertexShader: SHAFT_VERT,
       fragmentShader: SHAFT_FRAG,
@@ -739,23 +888,24 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
       side: THREE.DoubleSide,
     });
     const m = new THREE.Mesh(
-      new THREE.CylinderGeometry(r, r * 0.82, shaftHeight, 24, 1, true),
+      new THREE.CylinderGeometry(r, r * 0.82, h, 20, 1, true),
       mat
     );
-    m.position.set(sx, (WALL_H + bottom) / 2, sz);
-    m.rotation.z = tz;
-    m.rotation.x = tx;
+    m.position.set(x, (WALL_H + bottom) / 2, z);
     m.renderOrder = 7;
     group.add(m);
     shafts.push(m);
+    shaftBase.push(inten);
   }
+  // oculus cones into the lagoon
+  addShaft(pool.cx, pool.cz, 0.42, 0.5, WATER_Y);
+  addShaft(pool.cx, pool.cz, 0.85, 0.34, WATER_Y);
+  addShaft(pool.cx, pool.cz, 1.35, 0.22, WATER_Y);
+  addShaft(pool.cx, pool.cz, 1.9, 0.12, WATER_Y);
 
-  // ── pillars: marble with gilded capitals ──
+  // ── pillars: marble with gilded capitals, flanking the lagoon ──
   const pillarCells: [number, number][] = [
-    [2, 5],
-    [13, 5],
-    [2, 8],
-    [13, 8],
+    [12, 6], [23, 6], [12, 11], [23, 11],
   ];
   for (const [col, row] of pillarCells) {
     grid.cells[row * grid.w + col] = 1;
@@ -764,13 +914,11 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     const p = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H, 1.1), wallMat);
     p.position.set(px, WALL_H / 2, pz);
     group.add(p);
-    // gilded capital + base
     for (const y of [WALL_H - 0.09, 0.09]) {
       const cap = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.18, 1.26), goldMat);
       cap.position.set(px, y, pz);
       group.add(cap);
     }
-    // aqua light strip facing the lagoon
     const dir = Math.atan2(pool.cx - px, pool.cz - pz);
     const strip = new THREE.Mesh(
       new THREE.BoxGeometry(0.08, WALL_H - 0.7, 0.08),
@@ -780,7 +928,7 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     group.add(strip);
   }
 
-  // ── pedestals ──
+  // ── pedestals (three passes: atrium → wings → forge gallery) ──
   const pedMat = new THREE.MeshStandardMaterial({
     map: pedTex,
     roughness: 0.3,
@@ -795,14 +943,11 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     emissiveIntensity: 0.7,
     envMapIntensity: 1.25,
   });
-  const spawn = { x: 7 * CELL + CELL / 2, z: 12 * CELL + CELL / 2, yaw: 0 };
   const pedestals: PedestalInfo[] = [];
-  // two passes so the FORGE SHRINES land at the END of the array: catalog
-  // relics claim the core temple first, custom uploads fill the north
-  // gallery + freed south pair afterwards (engine tracks occupancy).
   const pedestalPasses: [number, number][] = [
-    [2, grid.h - 1], // core temple (rows 2..h-1)
-    [0, 2], // north gallery forge shrines (rows 0..1)
+    [4, 14],   // Grand Atrium rows
+    [15, 23],  // wing rows
+    [0, 4],    // Forge Gallery (custom shrines claim these LAST)
   ];
   for (const [rowStart, rowEnd] of pedestalPasses) {
     for (let row = rowStart; row < rowEnd; row++) {
@@ -818,13 +963,126 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
         group.add(cap);
         const facing = Math.atan2(spawn.x - px, spawn.z - pz);
         pedestals.push({ col, row, pos: new THREE.Vector3(px, 0, pz), facing, top: PED_TOP });
+        // HONEST collision: 0.9 m box, not the whole 1.2 m cell
+        colliders.push({
+          x0: px - PED_SIZE / 2 - 0.03, x1: px + PED_SIZE / 2 + 0.03,
+          z0: pz - PED_SIZE / 2 - 0.03, z1: pz + PED_SIZE / 2 + 0.03,
+        });
+        // sanctum light column over atrium relics only
+        if (row >= 4 && row < 14) addShaft(px, pz, 0.42, 0.13, FLOOR_Y);
       }
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // THE SANCTUM — where purchased relics take flesh
+  // ══════════════════════════════════════════════════════════════════════
+  const altarPos = new THREE.Vector3(
+    (altarCell.x0 + altarCell.x1) / 2, 0, (altarCell.z0 + altarCell.z1) / 2
+  );
+
+  // slim gold plinth discs mark the empty relic slots
+  const slotMat = new THREE.MeshStandardMaterial({
+    color: GOLD,
+    roughness: 0.3,
+    metalness: 1.0,
+    emissive: 0x2a1c05,
+    emissiveIntensity: 0.5,
+  });
+  for (const s of sanctumSlots) {
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.045, 18), slotMat);
+    disc.position.set(s.x, 0.022, s.z);
+    group.add(disc);
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.36, 0.008, 6, 22),
+      new THREE.MeshBasicMaterial({ color: AQUA_BRIGHT, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    halo.rotation.x = Math.PI / 2;
+    halo.position.set(s.x, 0.05, s.z);
+    group.add(halo);
+  }
+  addShaft(altarPos.x, altarPos.z, 0.62, 0.3, FLOOR_Y);
+  addShaft(cx, 32.4, 0.55, 0.16, FLOOR_Y); // sanctum glow over the south wall
+  addShaft(6 * CELL, 2.4, 0.7, 0.14, FLOOR_Y);   // forge gallery W
+  addShaft(30 * CELL, 2.4, 0.7, 0.14, FLOOR_Y);  // forge gallery E
+
+  // ── THE ACQUISITION ALTAR — a golden altar with a floating sigil orb ──
+  const altarG = new THREE.Group();
+  const altarBase = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.24, 1.05), slotMat);
+  altarBase.position.y = 0.12;
+  altarG.add(altarBase);
+  const altarMid = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 0.72), pedMat);
+  altarMid.position.y = 0.49;
+  altarG.add(altarMid);
+  const altarTop = new THREE.Mesh(new THREE.BoxGeometry(1.85, 0.08, 0.8), capMat);
+  altarTop.position.y = 0.78;
+  altarG.add(altarTop);
+  for (const sx of [-1, 1]) {
+    const wingCol = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.0, 0.14), slotMat);
+    wingCol.position.set(sx * 0.95, 0.5, 0.28);
+    altarG.add(wingCol);
+    const wingCap = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.06, 0.2), goldMat);
+    wingCap.position.set(sx * 0.95, 1.03, 0.28);
+    altarG.add(wingCap);
+  }
+  const sigil = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.16, 1),
+    new THREE.MeshStandardMaterial({
+      color: 0x67e8d8,
+      emissive: 0x2dd4bf,
+      emissiveIntensity: 2.8,
+      roughness: 0.15,
+      metalness: 0.2,
+    })
+  );
+  sigil.position.y = 1.45;
+  altarG.add(sigil);
+  const sigilHalo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.3, 0.02, 10, 30),
+    new THREE.MeshStandardMaterial({ color: 0xffe4a8, metalness: 1, roughness: 0.2, emissive: 0xc98a20, emissiveIntensity: 1.8 })
+  );
+  sigilHalo.rotation.x = Math.PI / 2 + 0.2;
+  sigilHalo.position.y = 1.45;
+  altarG.add(sigilHalo);
+  altarG.position.set(altarPos.x, 0, altarPos.z);
+  group.add(altarG);
+  colliders.push({ x0: altarCell.x0 + 0.05, x1: altarCell.x1 - 0.05, z0: altarCell.z0, z1: altarCell.z1 });
+
+  // ── Promenade benches — always sittable, always hospitable ──
+  const benches: BenchInfo[] = [];
+  const benchPearl = new THREE.MeshStandardMaterial({ color: 0xe9e2d2, roughness: 0.85, metalness: 0.05 });
+  const benchGold = new THREE.MeshStandardMaterial({ color: GOLD, roughness: 0.25, metalness: 1.0 });
+  function bench(x: number, z: number, yaw: number) {
+    const g = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.08, 0.5), benchPearl);
+    seat.position.y = BENCH_SEAT_Y - 0.04;
+    g.add(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.42, 0.07), benchPearl);
+    back.position.set(0, BENCH_SEAT_Y + 0.19, -0.22);
+    back.rotation.x = -0.13;
+    g.add(back);
+    for (const sx of [-0.8, 0.8]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, BENCH_SEAT_Y, 0.42), benchGold);
+      leg.position.set(sx, BENCH_SEAT_Y / 2, 0);
+      g.add(leg);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.56), benchGold);
+      rail.position.set(sx, BENCH_SEAT_Y + 0.06, 0.02);
+      g.add(rail);
+    }
+    const seam = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.016, 0.016), benchGold);
+    seam.position.set(0, BENCH_SEAT_Y + 0.02, 0.25);
+    g.add(seam);
+    g.position.set(x, 0, z);
+    g.rotation.y = yaw;
+    group.add(g);
+    // backrest sits at local -Z when yaw faces +Z… rotate so the seat faces yaw
+    benches.push({ pos: new THREE.Vector3(x, 0, z), yaw, seatY: BENCH_SEAT_Y + 0.5 });
+    colliders.push({ x0: x - 0.95, x1: x + 0.95, z0: z - 0.28, z1: z + 0.28 });
+  }
+  bench(cx, 16 * CELL + CELL / 2, 0); // north bench, faces the atrium
+  bench(cx, 21 * CELL + CELL / 2, 0); // south bench, faces the atrium
+
   // ── gilded reliquaries — the Doom crates, promoted to heaven ──
-  // Mirror marble under them, pearl sky painted on their gold: the boxes
-  // the original request dreamed of, drinking both reflections at once.
   const crateMat = new THREE.MeshPhysicalMaterial({
     color: GOLD,
     metalness: 1.0,
@@ -852,7 +1110,6 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     const lid = new THREE.Mesh(new THREE.BoxGeometry(s * 1.05, s * 0.18, s * 1.05), crateMat);
     lid.position.y = s * 0.62 + s * 0.09;
     rg.add(lid);
-    // relic gem — a sliver of the aqua lagoon, glowing through the gold
     const gem = new THREE.Mesh(
       new THREE.BoxGeometry(s * 0.22, s * 0.15, s * 0.22),
       new THREE.MeshStandardMaterial({
@@ -868,36 +1125,15 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     rg.position.set(x, FLOOR_Y, z);
     rg.rotation.y = rotY;
     group.add(rg);
-    // block the cell so pilgrims orbit, not clip
-    const col = Math.floor(x / CELL);
-    const row = Math.floor(z / CELL);
-    if (col >= 0 && col < grid.w && row >= 0 && row < grid.h) {
-      grid.cells[row * grid.w + col] = 1;
-    }
+    // HONEST collision: the crate's own footprint, not the whole cell
+    colliders.push({ x0: x - s * 0.55, x1: x + s * 0.55, z0: z - s * 0.55, z1: z + s * 0.55 });
   }
-  reliquary(2.55, 2.55, 0.86, 0.4);
-  reliquary(17.0, 8.9, 0.78, -0.7);
-  reliquary(14.6, 15.3, 0.9, 0.25);
-  reliquary(4.6, 15.0, 0.5, 0.9); // small offering box by the south pedestals
+  reliquary(2.7, 5.9, 0.86, 0.4);    // atrium west corner
+  reliquary(40.5, 5.9, 0.78, -0.7);  // atrium east corner
+  reliquary(2.7, 33.2, 0.9, 0.25);   // sanctum west
+  reliquary(40.5, 33.2, 0.55, 0.9);  // sanctum east
 
-  // ── halo light strips ──
-  group.add(neonStrip(W - 1.2, AQUA_BRIGHT, [cx, 3.35, 0.06], 0, beamTex)); // N aqua
-  group.add(neonStrip(D - 1.2, AQUA_BRIGHT, [W - 0.06, 3.35, cz], Math.PI / 2, beamTex)); // E aqua
-  group.add(neonStrip(D - 1.2, GOLD_BRIGHT, [0.06, 3.35, cz], -Math.PI / 2, beamTex)); // W gold
-  group.add(neonStrip(6.5, GOLD_BRIGHT, [cx - 5.6, 3.1, D - 0.06], Math.PI, beamTex)); // S gold L
-  group.add(neonStrip(6.5, GOLD_BRIGHT, [cx + 5.6, 3.1, D - 0.06], Math.PI, beamTex)); // S gold R
-
-  group.add(sign("CELESTIA GALLERIA", 5.2, [cx, 2.55, 0.03], 0, "#ffd98c"));
-  group.add(sign("EXIT", 1.5, [cx, 2.2, D - 0.03], Math.PI, "#9de8b8"));
-  group.add(sign("OPTICS", 1.9, [3 * CELL + 0.6, 1.9, 0.03], 0, "#3fd8c8"));
-  group.add(sign("GAMING", 1.9, [12 * CELL + 0.6, 1.9, 0.03], 0, "#3fd8c8"));
-  group.add(sign("AUDIO", 1.9, [W - 0.03, 1.9, 7 * CELL + 1.8], -Math.PI / 2, "#3fd8c8"));
-  group.add(sign("WEARABLES", 2.2, [0.03, 1.9, 7 * CELL + 0.6], Math.PI / 2, "#3fd8c8"));
-  group.add(sign("AERIAL", 1.9, [10.5 * CELL, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
-  group.add(sign("FOOTWEAR", 1.9, [13 * CELL, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
-  group.add(sign("COMPUTING", 2.0, [3 * CELL + 0.6, 1.9, D - 0.03], Math.PI, "#3fd8c8"));
-
-  // ── lights (temple of retail) ──
+  // ── lights (temple of retail, mall edition) ──
   const hemi = new THREE.HemisphereLight(0xfff5e0, 0x6b7a80, 0.8);
   group.add(hemi);
   const sun = new THREE.DirectionalLight(0xffeecf, 1.5);
@@ -910,15 +1146,24 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
   const poolLight = new THREE.PointLight(0x49e0d0, 24, 22, 2);
   poolLight.position.set(pool.cx, WATER_Y + 0.7, pool.cz);
   group.add(poolLight);
-  const exitLight = new THREE.PointLight(0xffd98c, 9, 12, 2);
-  exitLight.position.set(spawn.x, 2.6, spawn.z - 1.5);
-  group.add(exitLight);
-  const seraphLight = new THREE.PointLight(0xfff0c8, 7, 11, 2);
-  seraphLight.position.set(3 * CELL + 0.6, 2.9, 9 * CELL + 0.6);
-  group.add(seraphLight);
+  const altarLight = new THREE.PointLight(0xffd98c, 10, 12, 2);
+  altarLight.position.set(altarPos.x, 2.4, altarPos.z);
+  group.add(altarLight);
+  const spawnLight = new THREE.PointLight(0xfff0c8, 7, 11, 2);
+  spawnLight.position.set(spawn.x, 2.6, spawn.z - 0.5);
+  group.add(spawnLight);
+  const westLight = new THREE.PointLight(0x9ff5ec, 6, 12, 2);
+  westLight.position.set(7 * CELL, 2.9, 18.5 * CELL);
+  group.add(westLight);
+  const eastLight = new THREE.PointLight(0xffd98c, 6, 12, 2);
+  eastLight.position.set(29 * CELL, 2.9, 18.5 * CELL);
+  group.add(eastLight);
+  const forgeLight = new THREE.PointLight(0x9ff5ec, 7, 10, 2);
+  forgeLight.position.set(cx, 2.9, 2 * CELL);
+  group.add(forgeLight);
 
-  // ── angel dust: golden motes rising through the light ──
-  const DUST = 360;
+  // ── angel dust: golden motes rising through the whole mall ──
+  const DUST = 520;
   const dustGeo = new THREE.BufferGeometry();
   const dustPos = new Float32Array(DUST * 3);
   const dustSeed = new Float32Array(DUST);
@@ -929,34 +1174,36 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
     dustSeed[i] = Math.random() * Math.PI * 2;
   }
   dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
-  const dust = new THREE.Points(
-    dustGeo,
-    new THREE.PointsMaterial({
-      color: new THREE.Color(0xffdf9e).multiplyScalar(1.8),
-      size: 0.03,
-      transparent: true,
-      opacity: 0.5,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      fog: true,
-    })
-  );
+  const dustMat = new THREE.PointsMaterial({
+    color: new THREE.Color(0xffdf9e).multiplyScalar(1.8),
+    size: 0.03,
+    transparent: true,
+    opacity: 0.5,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: true,
+  });
+  const dust = new THREE.Points(dustGeo, dustMat);
   group.add(dust);
 
-  // ── wandering light orbs (soft golden spirits) ──
+  // ── wandering light orbs (soft golden spirits, mall-wide) ──
   const orbs: THREE.Sprite[] = [];
   const orbSpecs: [number, number, number, number, number][] = [
     // [x, z, height, scale, speed]
-    [3.5, 3.5, 2.6, 0.5, 0.11],
-    [15.5, 4.2, 3.1, 0.38, 0.14],
-    [16.2, 12.5, 2.2, 0.55, 0.09],
-    [3.0, 12.8, 3.4, 0.42, 0.12],
-    [9.6, 2.6, 3.0, 0.34, 0.16],
-    [9.6, 14.2, 2.5, 0.46, 0.1],
-    [6.2, 8.4, 3.6, 0.3, 0.18],
-    [12.8, 3.4, 2.8, 0.36, 0.13],
-    [6.9, 11.6, 3.2, 0.33, 0.15],
-    [13.4, 13.8, 2.6, 0.4, 0.12],
+    [4.0, 6.5, 2.6, 0.5, 0.11],      // atrium W
+    [39.0, 6.5, 3.1, 0.38, 0.14],    // atrium E
+    [21.6, 6.2, 3.0, 0.34, 0.16],    // atrium N
+    [21.6, 15.8, 2.6, 0.46, 0.10],   // atrium S
+    [5.5, 2.4, 2.8, 0.4, 0.12],      // forge gallery
+    [37.0, 2.4, 2.6, 0.36, 0.13],    // forge gallery
+    [7.0, 21.0, 2.6, 0.42, 0.10],    // west wing
+    [36.0, 21.0, 2.9, 0.4, 0.12],    // east wing
+    [21.6, 20.4, 3.3, 0.32, 0.15],   // promenade
+    [21.6, 26.4, 2.7, 0.38, 0.11],   // promenade
+    [6.0, 31.8, 2.4, 0.36, 0.12],    // sanctum W
+    [37.0, 31.8, 2.4, 0.36, 0.12],   // sanctum E
+    [21.6, 33.0, 2.8, 0.3, 0.14],    // by the spawn
+    [14.5, 10.8, 3.4, 0.3, 0.09],    // over the lagoon W
   ];
   for (const [ox, oz, oy, sc, sp] of orbSpecs) {
     const s = new THREE.Sprite(
@@ -970,15 +1217,130 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
       })
     );
     s.scale.set(sc, sc, 1);
-    s.userData = { ox, oz, oy, sp, ph: Math.random() * Math.PI * 2 };
+    s.userData = { ox, oz, oy, sp, ph: Math.random() * Math.PI * 2, base: 0.55 };
     orbs.push(s);
     group.add(s);
   }
+
+  // ── sparkle burst pool (LUMEN FERN / bless effects) ──
+  const SPARK = 64;
+  const sparks: THREE.Sprite[] = [];
+  for (let i = 0; i < SPARK; i++) {
+    const s = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTex,
+        color: new THREE.Color(0xffe4ae).multiplyScalar(1.9),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: true,
+      })
+    );
+    s.scale.set(0.14, 0.14, 1);
+    s.visible = false;
+    s.userData = { vx: 0, vy: 0, vz: 0, life: 0 };
+    sparks.push(s);
+    group.add(s);
+  }
+  function sparkleBurst(x: number, z: number) {
+    for (const s of sparks) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.2 + Math.random() * 0.9;
+      s.position.set(x + Math.cos(a) * r, 0.15 + Math.random() * 0.4, z + Math.sin(a) * r);
+      const ud = s.userData as { vx: number; vy: number; vz: number; life: number };
+      ud.vx = Math.cos(a) * (0.3 + Math.random() * 0.5);
+      ud.vz = Math.sin(a) * (0.3 + Math.random() * 0.5);
+      ud.vy = 0.8 + Math.random() * 1.3;
+      ud.life = 1;
+      s.visible = true;
+    }
+  }
+
+  // ── rite burst columns (checkout ceremony light) ──
+  const riteCols: THREE.Mesh[] = [];
+  const riteGlows: THREE.Sprite[] = [];
+  for (let i = 0; i < 2; i++) {
+    const col = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.85, 0.55, WALL_H, 22, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(0xffe4ae).multiplyScalar(1.6),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        fog: false,
+      })
+    );
+    col.position.set(-99, WALL_H / 2, -99);
+    col.renderOrder = 8;
+    col.visible = false;
+    col.userData = { life: 0 };
+    group.add(col);
+    riteCols.push(col);
+    const gl = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: glowTex,
+        color: new THREE.Color(0xffe4ae).multiplyScalar(2.0),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    gl.position.set(-99, 0.3, -99);
+    gl.visible = false;
+    gl.userData = { life: 0 };
+    group.add(gl);
+    riteGlows.push(gl);
+  }
+  let riteIdx = 0;
+  function riteBurst(x: number, z: number) {
+    const col = riteCols[riteIdx % riteCols.length];
+    const gl = riteGlows[riteIdx % riteGlows.length];
+    riteIdx++;
+    col.position.set(x, WALL_H / 2, z);
+    col.visible = true;
+    col.userData.life = 1;
+    gl.position.set(x, 0.35, z);
+    gl.visible = true;
+    gl.userData.life = 1;
+  }
+
+  // ── zones (for the zone banner) ──
+  const zones: ZoneInfo[] = [
+    { name: "THE SANCTUM", x0: CELL, z0: 23 * CELL + CELL, x1: W - CELL, z1: D - CELL },
+    { name: "GARDEN & AUDIO", x0: CELL, z0: 15 * CELL - 0.2, x1: 12 * CELL, z1: 23 * CELL + 0.2 },
+    { name: "THE PROMENADE", x0: 12 * CELL + 0.2, z0: 15 * CELL - 0.2, x1: 24 * CELL - 0.2, z1: 23 * CELL + 0.2 },
+    { name: "VISION", x0: 24 * CELL, z0: 15 * CELL - 0.2, x1: W - CELL, z1: 23 * CELL + 0.2 },
+    { name: "THE GRAND ATRIUM", x0: CELL, z0: 3 * CELL + CELL, x1: W - CELL, z1: 14 * CELL },
+    { name: "THE FORGE GALLERY", x0: CELL, z0: CELL, x1: W - CELL, z1: 3 * CELL },
+  ];
+
+  // ── mood state (cinema / dawn) ──
+  let mood: "cinema" | "dawn" | null = null;
+  const MOODS = {
+    cinema: { hemi: 0.22, sun: 0.45, fog: 0.030, oculus: 22, warm: 0xffc98c },
+    dawn: { hemi: 1.25, sun: 2.4, fog: 0.016, oculus: 20, warm: 0xffd9b0 },
+    normal: { hemi: 0.8, sun: 1.5, fog: 0.014, oculus: 14, warm: 0xffe4b0 },
+  } as const;
+  let moodT = 0; // 0 = normal, 1 = fully in mood
+
+  // ── boost timers ──
+  let orbBoostT = 0;
+  let starK = 0;
+  let dustK = 1;
 
   return {
     group,
     grid,
     pedestals,
+    colliders,
+    sanctumSlots,
+    altar: { pos: altarPos },
+    benches,
+    zones,
     pool,
     spawn,
     envTexture,
@@ -987,38 +1349,112 @@ export function buildLevel(renderer: THREE.WebGLRenderer): LevelRig {
       water.update(t);
       fu.uTime.value = t;
       skyMat.uniforms.uTime.value = t;
+      // star twinkle decays gently back to zero
+      starK = Math.max(0, starK - dt * 0.22);
+      skyMat.uniforms.uStar.value = starK;
       for (let i = 0; i < shafts.length; i++) {
         const m = shafts[i];
         const u = (m.material as THREE.ShaderMaterial).uniforms;
         u.uTime.value = t;
-        u.uIntensity.value = shaftSpecs[i][3] * (0.82 + 0.18 * Math.sin(t * 0.7 + i * 1.7));
+        u.uIntensity.value = shaftBase[i] * (0.82 + 0.18 * Math.sin(t * 0.7 + i * 1.7));
       }
-      // lagoon glow breathing
+      // lagoon + altar glow breathing
       poolLight.intensity = 22 + Math.sin(t * 1.7) * 4;
       oculusGlow.intensity = 13 + Math.sin(t * 0.8) * 3;
-      // seraph pulse (gentle, no doom flicker in heaven)
-      seraphLight.intensity = 6.5 + Math.sin(t * 0.9) * 2.5;
-      // angel dust rises with a slow swirl
+      altarLight.intensity = 9 + Math.sin(t * 1.1) * 3;
+      // altar sigil: slow spin + bob
+      sigil.rotation.y += dt * 0.8;
+      sigil.position.y = 1.45 + Math.sin(t * 1.3) * 0.08;
+      sigilHalo.rotation.z = Math.sin(t * 0.9) * 0.25;
+      // angel dust rises with a slow swirl (density-scaled)
       const pos = dustGeo.attributes.position as THREE.BufferAttribute;
+      const rate = 0.07 * (0.6 + 0.4 * dustK);
       for (let i = 0; i < DUST; i++) {
-        let y = pos.getY(i) + dt * 0.07;
+        let y = pos.getY(i) + dt * rate;
         let x = pos.getX(i) + Math.sin(t * 0.35 + dustSeed[i]) * dt * 0.03;
         if (y > WALL_H - 0.3) y = 0.4;
         pos.setY(i, y);
         pos.setX(i, Math.max(0.2, Math.min(W - 0.2, x)));
       }
       pos.needsUpdate = true;
-      // light orbs drift on lissajous paths
+      dustMat.opacity = 0.5 * Math.max(0, dustK);
+      // light orbs drift on lissajous paths (+ harmony boost pulse)
+      if (orbBoostT > 0) orbBoostT = Math.max(0, orbBoostT - dt);
+      const ob = orbBoostT > 0 ? 1 + 0.6 * Math.sin(t * 6) : 1;
       for (const s of orbs) {
-        const ud = s.userData as { ox: number; oz: number; oy: number; sp: number; ph: number };
+        const ud = s.userData as { ox: number; oz: number; oy: number; sp: number; ph: number; base: number };
         s.position.set(
           ud.ox + Math.sin(t * ud.sp + ud.ph) * 1.1,
           ud.oy + Math.sin(t * ud.sp * 0.7 + ud.ph * 2.0) * 0.35,
           ud.oz + Math.cos(t * ud.sp * 0.85 + ud.ph) * 1.1
         );
+        const mm = s.material as THREE.SpriteMaterial;
+        mm.opacity = ud.base * ob;
       }
+      // sparkle pool physics
+      for (const s of sparks) {
+        const ud = s.userData as { vx: number; vy: number; vz: number; life: number };
+        if (ud.life <= 0) continue;
+        ud.life = Math.max(0, ud.life - dt * 0.45);
+        ud.vy -= dt * 0.35;
+        s.position.x += ud.vx * dt;
+        s.position.y += ud.vy * dt;
+        s.position.z += ud.vz * dt;
+        const mm = s.material as THREE.SpriteMaterial;
+        mm.opacity = ud.life * 0.95;
+        const sc = 0.1 + (1 - ud.life) * 0.12;
+        s.scale.set(sc, sc, 1);
+        if (ud.life <= 0) s.visible = false;
+      }
+      // rite burst columns bloom then fade
+      for (let i = 0; i < riteCols.length; i++) {
+        const col = riteCols[i];
+        const gl = riteGlows[i];
+        const cu = col.userData as { life: number };
+        const gu = gl.userData as { life: number };
+        if (cu.life <= 0) continue;
+        cu.life = Math.max(0, cu.life - dt * 0.55);
+        const k = cu.life;
+        (col.material as THREE.MeshBasicMaterial).opacity = k * 0.4;
+        col.scale.set(1 + (1 - k) * 0.35, 1, 1 + (1 - k) * 0.35);
+        gu.life = cu.life;
+        (gl.material as THREE.SpriteMaterial).opacity = k * 0.9;
+        const gs = 1.2 + (1 - k) * 4.5;
+        gl.scale.set(gs, gs, 1);
+        if (cu.life <= 0) {
+          col.visible = false;
+          gl.visible = false;
+        }
+      }
+      // mood lerp (cinema / dawn / normal)
+      const target = mood ? MOODS[mood] : MOODS.normal;
+      moodT = Math.min(1, moodT + (mood ? dt * 1.4 : dt * 0.9));
+      const inv = 1 - moodT;
+      hemi.intensity = MOODS.normal.hemi * inv + target.hemi * moodT;
+      sun.intensity = MOODS.normal.sun * inv + target.sun * moodT;
+      oculusGlow.intensity =
+        (13 + Math.sin(t * 0.8) * 3) * inv + target.oculus * moodT;
+      oculusGlow.color.setHex(mood === "cinema" ? 0xffc98c : mood === "dawn" ? 0xffd9b0 : 0xffe4b0);
     },
     renderReflection,
     setMirror,
+    setDust(k: number) {
+      dustK = Math.max(0, Math.min(2, k));
+    },
+    setShafts(on: boolean) {
+      for (const m of shafts) m.visible = on;
+    },
+    setMood(m: "cinema" | "dawn" | null) {
+      mood = m;
+      if (!m) moodT = Math.max(0, moodT - 0.001); // will ease back in update()
+    },
+    sparkleBurst,
+    riteBurst,
+    orbBoost(seconds: number) {
+      orbBoostT = seconds;
+    },
+    starBoost(k: number) {
+      starK = Math.max(starK, k);
+    },
   };
 }
